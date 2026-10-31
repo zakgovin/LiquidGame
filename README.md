@@ -48,7 +48,7 @@ python3 scripts/setup.py --android
 
 ```bash
 adb install -r build/hydrologic-0.1.0-android.apk
-adb shell am start -n com.zakgovin.hydrologic/com.godot.game.GodotApp
+adb shell am start -n com.zakgovin.hydrologic/com.godot.game.GodotAppLauncher
 ```
 
 ## Устройство прототипа

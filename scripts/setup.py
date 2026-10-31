@@ -123,6 +123,7 @@ export/android/android_sdk_path = "{sdk}"
 export/android/debug_keystore = "{keystore}"
 export/android/debug_keystore_user = "androiddebugkey"
 export/android/debug_keystore_pass = "android"
+export/android/shutdown_adb_on_exit = false
 ''')
     print("Android APK export tools ready (debug signing only).", flush=True)
 

@@ -20,17 +20,24 @@ func capture(name: String) -> void:
 	check(root.get_texture().get_image().save_png("res://build/" + name + ".png") == OK, "Rendered " + name)
 
 
-func tap(point: Vector2) -> void:
+func tap(point: Vector2, finger: bool = false) -> void:
 	var motion := InputEventMouseMotion.new()
 	motion.position = point
 	Input.parse_input_event(motion)
 	await process_frame
 	for pressed: bool in [true, false]:
-		var event := InputEventMouseButton.new()
-		event.button_index = MOUSE_BUTTON_LEFT
-		event.position = point
-		event.pressed = pressed
-		Input.parse_input_event(event)
+		if finger:
+			var event := InputEventScreenTouch.new()
+			event.index = 0
+			event.position = point
+			event.pressed = pressed
+			Input.parse_input_event(event)
+		else:
+			var event := InputEventMouseButton.new()
+			event.button_index = MOUSE_BUTTON_LEFT
+			event.position = point
+			event.pressed = pressed
+			Input.parse_input_event(event)
 		await process_frame
 
 
@@ -40,8 +47,8 @@ func _run() -> void:
 	root.add_child(game)
 	await process_frame
 	await capture("intro")
-	await tap(Vector2(360, 790))
-	check(game.running and game.hud._modal == null, "Start button receives pointer input")
+	await tap(Vector2(360, 790), true)
+	check(game.running and game.hud._modal == null, "Start button receives native touch input")
 	await process_frame
 	# A real finger on the pad must work independently of emulated mouse events.
 	var touch := InputEventScreenTouch.new()
@@ -65,6 +72,7 @@ func _run() -> void:
 	await tap(Vector2(360, 790))
 	check(game.running and game.hud._modal == null, "Continue button resumes")
 	game.set_physics_process(false)
+	game._restart()
 	# Exercise actual game progression, including the controller's victory transition.
 	for tilt: Vector2 in [Vector2.DOWN, Vector2.RIGHT, Vector2.DOWN]:
 		game.controls.touch = tilt
@@ -72,6 +80,7 @@ func _run() -> void:
 			game._physics_process(1.0 / 60.0)
 			if frame % 60 == 0:
 				await process_frame
+	print("Controller delivered fraction: ", game.simulation.goal_fraction)
 	check(game.simulation.completed and not game.running, "Real controller reaches victory")
 	await capture("victory")
 	await tap(Vector2(360, 790))

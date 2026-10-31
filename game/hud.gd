@@ -86,7 +86,7 @@ func _ready() -> void:
 
 func update_state(fraction: float, tilt: Vector2, sensor: bool, running: bool) -> void:
 	progress.value = fraction * 100.0
-	percent.text = "%d%%" % roundi(fraction * 100.0)
+	percent.text = "%d%%" % floori(fraction * 100.0)
 	pad.indicator = tilt
 	pad.active = running and (_use_touch or not sensor)
 	pad.queue_redraw()
@@ -119,14 +119,16 @@ func show_pause() -> void:
 
 func show_win(fraction: float) -> void:
 	pad.reset()
-	_modal_card("ПОТОК ДОСТАВЛЕН", "Отличное течение", "В приёмнике %d%% воды. Цель — 80%%.\n\nПервый уровень пройден.\nДальше — новые формы и свойства жидкости." % roundi(fraction * 100.0), "Пройти ещё раз", func():
+	_modal_card("ПОТОК ДОСТАВЛЕН", "Отличное течение", "В приёмнике %d%% воды. Цель — 80%%.\n\nПервый уровень пройден.\nДальше — новые формы и свойства жидкости." % floori(fraction * 100.0), "Пройти ещё раз", func():
 		hide_modal()
 		restart_requested.emit(), false)
 
 
 func hide_modal() -> void:
 	if _modal != null:
-		remove_child(_modal)
+		# Stay in the tree until the current native touch/mouse event has finished
+		# propagating through Godot's GUI path.
+		_modal.hide()
 		_modal.queue_free()
 		_modal = null
 
