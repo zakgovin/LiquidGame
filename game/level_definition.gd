@@ -10,6 +10,8 @@ extends Resource
 @export var particle_count: int = 288
 @export_range(0.0, 1.0) var required_fraction: float = 0.8
 @export var hold_seconds: float = 0.75
+@export var board_bounds: Rect2 = Rect2(-2.95, -4.9, 5.9, 9.8)
+@export var route: PackedVector2Array
 
 
 func contains(point: Vector2, margin: float = 0.0) -> bool:

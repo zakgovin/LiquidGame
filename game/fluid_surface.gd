@@ -4,11 +4,11 @@ extends MeshInstance3D
 ## Marching squares at 30 Hz. No per-particle Nodes or draw calls.
 
 const CELL: float = 0.095
-const ORIGIN := Vector2(-3.25, -4.45)
+const ORIGIN := Vector2(-3.25, -4.85)
 const WIDTH: int = 72
-const HEIGHT: int = 95
-const ISO: float = 0.55
-const RADIUS: float = 0.235
+const HEIGHT: int = 104
+const ISO: float = 0.50
+const RADIUS: float = 0.195
 const POLYGONS: Array = [
 	[], [[0, 4, 7]], [[1, 5, 4]], [[0, 1, 5, 7]],
 	[[2, 6, 5]], [[0, 4, 7], [2, 6, 5]], [[1, 2, 6, 4]], [[0, 1, 2, 6, 7]],
@@ -64,10 +64,10 @@ func rebuild(particles: PackedVector2Array, level: LevelDefinition) -> void:
 				continue
 			var x := ORIGIN.x + gx * CELL
 			var z := ORIGIN.y + gy * CELL
-			_points[0] = Vector3(x, 0.13, z)
-			_points[1] = Vector3(x + CELL, 0.13, z)
-			_points[2] = Vector3(x + CELL, 0.13, z + CELL)
-			_points[3] = Vector3(x, 0.13, z + CELL)
+			_points[0] = Vector3(x, 0.06, z)
+			_points[1] = Vector3(x + CELL, 0.06, z)
+			_points[2] = Vector3(x + CELL, 0.06, z + CELL)
+			_points[3] = Vector3(x, 0.06, z + CELL)
 			for edge: int in range(4):
 				var next := (edge + 1) % 4
 				var denominator: float = values[next] - values[edge]

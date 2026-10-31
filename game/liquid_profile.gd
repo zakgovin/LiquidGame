@@ -12,3 +12,6 @@ extends Resource
 @export_range(0.0, 5.0) var viscosity: float = 0.18
 @export var interaction_radius: float = 0.25
 @export var particle_radius: float = 0.052
+@export_range(0.0, 100.0) var cohesion_pressure: float = 3.0
+@export_range(0.0, 5.0) var drag: float = 0.12
+@export var max_speed: float = 5.5

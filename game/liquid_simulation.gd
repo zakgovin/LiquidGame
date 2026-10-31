@@ -27,7 +27,7 @@ func reset() -> void:
 	positions.resize(level.particle_count)
 	velocities.resize(level.particle_count)
 	_previous.resize(level.particle_count)
-	var columns := 18
+	var columns := maxi(1, floori((level.spawn.size.x - 0.12) / 0.106))
 	for i: int in range(level.particle_count):
 		var column := i % columns
 		var row := i / columns
@@ -73,8 +73,8 @@ func _substep(dt: float, acceleration: Vector2) -> void:
 	var count := positions.size()
 	for i: int in range(count):
 		_previous[i] = positions[i]
-		velocities[i] = (velocities[i] + acceleration * dt) * exp(-0.6 * dt)
-		positions[i] += velocities[i].limit_length(4.0) * dt
+		velocities[i] = (velocities[i] + acceleration * dt) * exp(-material.drag * dt)
+		positions[i] += velocities[i].limit_length(material.max_speed) * dt
 	for iteration: int in range(2):
 		_rebuild_grid()
 		for i: int in range(count):
@@ -101,7 +101,7 @@ func _substep(dt: float, acceleration: Vector2) -> void:
 						_distances.append(distance)
 			# Negative pressure supplies limited cohesion / surface tension.
 			var pressure := material.pressure_stiffness * (density - material.rest_density)
-			pressure = maxf(pressure, -35.0)
+			pressure = maxf(pressure, -material.cohesion_pressure)
 			var near_pressure := material.near_pressure_stiffness * near_density
 			var correction := Vector2.ZERO
 			for n: int in range(_neighbors.size()):
@@ -116,7 +116,7 @@ func _substep(dt: float, acceleration: Vector2) -> void:
 		for i: int in range(count):
 			positions[i] = level.constrain(positions[i], material.particle_radius)
 	for i: int in range(count):
-		velocities[i] = ((positions[i] - _previous[i]) / dt).limit_length(4.0)
+		velocities[i] = ((positions[i] - _previous[i]) / dt).limit_length(material.max_speed)
 	# Pairwise viscosity transfers momentum without an order-dependent global drag.
 	for i: int in range(count):
 		var point := positions[i]

@@ -5,10 +5,15 @@ signal start_requested
 signal pause_requested
 signal resume_requested
 signal restart_requested
+signal menu_requested
+signal settings_requested
+signal about_requested
+signal levels_requested
+signal level_selected(index: int)
 signal calibrate_requested
 signal sensitivity_changed(value: float)
 signal mode_changed(use_touch: bool)
-signal touch_changed(value: Vector2)
+signal feedback_changed(enabled: bool)
 
 const INK := Color("203740")
 const MUTED := Color("6d8289")
@@ -16,17 +21,16 @@ const RED := Color("eb4c42")
 const REGULAR = preload("res://assets/fonts/NotoSans-Regular.ttf")
 const BOLD = preload("res://assets/fonts/NotoSans-Bold.ttf")
 
-var pad: TiltPad
-var progress: ProgressBar
-var percent: Label
-var hint: Label
-var mode_button: Button
+var field: FieldInput
 var pause_button: Button
-var zero_button: Button
-var slider: HSlider
+var page: Control
 var _modal: Control
-var _use_touch: bool = false
-var _toast_until: int = 0
+var _frames: Array[Control] = []
+var _calibration_status: Label
+var buttons: Dictionary = {}
+var slider: HSlider
+var mode_picker: OptionButton
+var feedback_toggle: CheckButton
 
 
 func _ready() -> void:
@@ -34,146 +38,220 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var app_theme := Theme.new()
 	app_theme.default_font = REGULAR
-	app_theme.default_font_size = 19
+	app_theme.default_font_size = 24
 	theme = app_theme
-	_label("ГИДРОЛОГИКА / ПРОТОТИП", Vector2(36, 48), 17, RED, true)
-	_label("HYDROLOGIC", Vector2(32, 78), 43, INK, true)
-	pause_button = _button("Ⅱ", Rect2(612, 72, 72, 72), false, func(): pause_requested.emit())
-	pause_button.tooltip_text = "Пауза (Esc)"
-	_label("01", Vector2(36, 165), 27, RED, true)
-	_label("ПЕРВЫЙ ПОТОК", Vector2(90, 170), 22, INK, true)
-	_label("Направьте воду в красный сосуд", Vector2(36, 209), 19, MUTED)
-	_label("H₂O", Vector2(625, 172), 23, MUTED, true)
-	_line(Rect2(36, 254, 648, 1), Color("cddadd"))
-	# White footer isolates the controls from architectural detail.
-	_line(Rect2(0, 1000, 720, 280), Color("f6f9f8"))
-	_line(Rect2(36, 1000, 648, 1), Color("cddadd"))
-	_label("В ПРИЁМНИКЕ", Vector2(36, 1021), 16, MUTED, true)
-	percent = _label("0%", Vector2(32, 1046), 43, INK, true)
-	_label("ЦЕЛЬ 80%", Vector2(350, 1070), 16, MUTED, true)
-	progress = ProgressBar.new()
-	progress.position = Vector2(36, 1112)
-	progress.size = Vector2(416, 6)
-	progress.show_percentage = false
-	progress.add_theme_font_size_override("font_size", 1)
-	progress.add_theme_stylebox_override("background", _style(Color("dce6e8"), 3))
-	progress.add_theme_stylebox_override("fill", _style(Color("159fc7"), 3))
-	add_child(progress)
-	# Mark the actual threshold, rather than implying the player needs 100%.
-	_line(Rect2(36 + 416 * 0.8, 1108, 2, 14), RED)
-	pad = TiltPad.new()
-	pad.position = Vector2(521, 1016)
-	pad.size = Vector2(154, 154)
-	pad.vector_changed.connect(func(value: Vector2): touch_changed.emit(value))
-	add_child(pad)
-	_label("Чувствительность", Vector2(36, 1139), 16, MUTED)
+	field = FieldInput.new()
+	field.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(field)
+	pause_button = _button("Ⅱ", Rect2(0, 0, 96, 96), false, func(): pause_requested.emit(), self, "pause")
+	pause_button.tooltip_text = "Пауза"
+	resized.connect(_layout)
+	_layout()
+
+
+func _layout() -> void:
+	for frame: Control in _frames:
+		if is_instance_valid(frame):
+			frame.position = (size - Vector2(720, 1280)) * 0.5
+	pause_button.position = Vector2(size.x - 124, 32)
+
+
+func _clear_page() -> void:
+	hide_modal()
+	if is_instance_valid(page):
+		page.hide()
+		page.queue_free()
+	page = null
+	_frames.clear()
+	buttons.clear()
+	buttons["pause"] = pause_button
+	_calibration_status = null
+	field.active = false
+	field.reset()
+
+
+func _layer(veil: float = 0.98) -> Control:
+	var layer := Control.new()
+	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(layer)
+	var background := ColorRect.new()
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	background.color = Color(0.92, 0.95, 0.94, veil)
+	layer.add_child(background)
+	return layer
+
+
+func _frame(parent: Control) -> Control:
+	var frame := Control.new()
+	frame.position = (size - Vector2(720, 1280)) * 0.5
+	frame.size = Vector2(720, 1280)
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(frame)
+	_frames.append(frame)
+	return frame
+
+
+func show_menu(level_title: String) -> void:
+	_clear_page()
+	pause_button.hide()
+	page = _layer(0.94)
+	var frame := _frame(page)
+	var icon := TextureRect.new()
+	icon.texture = preload("res://assets/icon.svg")
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.position = Vector2(296, 230)
+	icon.size = Vector2(128, 128)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.add_child(icon)
+	_center_label("ГИДРОЛОГИКА", 394, 49, INK, true, frame)
+	_center_label("HYDROLOGIC", 463, 21, MUTED, false, frame)
+	_button("01  /  " + level_title + "   ›", Rect2(80, 578, 560, 88), false, func(): levels_requested.emit(), frame, "levels")
+	_button("Играть", Rect2(80, 690, 560, 112), true, func(): start_requested.emit(), frame, "play")
+	_button("Настройки", Rect2(80, 832, 272, 96), false, func(): settings_requested.emit(), frame, "settings")
+	_button("Об игре", Rect2(368, 832, 272, 96), false, func(): about_requested.emit(), frame, "about")
+
+
+func show_game(touch_enabled: bool) -> void:
+	_clear_page()
+	pause_button.show()
+	field.active = touch_enabled
+
+
+func show_levels(level_title: String) -> void:
+	var frame := _page_header("Уровни")
+	_label("Выберите маршрут", Vector2(80, 310), 25, MUTED, false, frame)
+	_button("01   " + level_title, Rect2(80, 382, 560, 120), true, func(): level_selected.emit(0), frame, "level_0")
+	_label("Полный виток вокруг центрального сосуда", Vector2(80, 540), 23, MUTED, false, frame)
+	_label("В прототипе пока доступен один уровень.", Vector2(80, 596), 23, MUTED, false, frame)
+
+
+func show_settings(sensitivity: float, use_touch: bool, feedback: bool, sensor: bool) -> void:
+	var frame := _page_header("Настройки")
+	_label("Управление", Vector2(80, 304), 26, INK, true, frame)
+	mode_picker = OptionButton.new()
+	mode_picker.position = Vector2(80, 356)
+	mode_picker.size = Vector2(560, 80)
+	mode_picker.add_item("Наклон телефона")
+	mode_picker.add_item("Касание экрана")
+	mode_picker.select(1 if use_touch else 0)
+	mode_picker.add_theme_font_size_override("font_size", 26)
+	for state: String in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		mode_picker.add_theme_color_override(state, INK)
+	for state: String in ["normal", "hover", "pressed", "focus"]:
+		mode_picker.add_theme_stylebox_override(state, _style(Color("e3ebed"), 10))
+	mode_picker.item_selected.connect(func(index: int): mode_changed.emit(index == 1))
+	frame.add_child(mode_picker)
+	var sensitivity_label := _label("Чувствительность  ×%.1f" % sensitivity, Vector2(80, 484), 25, INK, false, frame)
 	slider = HSlider.new()
-	slider.position = Vector2(234, 1134)
-	slider.size = Vector2(214, 40)
+	slider.position = Vector2(80, 538)
+	slider.size = Vector2(560, 56)
 	slider.min_value = 0.5
 	slider.max_value = 1.8
 	slider.step = 0.1
-	slider.value = 1.0
-	slider.tooltip_text = "Чувствительность наклона"
-	slider.value_changed.connect(func(value: float): sensitivity_changed.emit(value))
-	add_child(slider)
-	_button("Заново", Rect2(36, 1188, 196, 72), false, func(): restart_requested.emit())
-	zero_button = _button("Ноль наклона", Rect2(246, 1188, 214, 72), false, func(): calibrate_requested.emit())
-	mode_button = _button("Наклон", Rect2(474, 1188, 210, 72), false, _toggle_mode)
-	hint = _label("", Vector2(36, 271), 16, MUTED)
-	show_intro()
+	slider.value = sensitivity
+	var track := _style(Color("ccdadd"), 3)
+	track.content_margin_top = 3
+	track.content_margin_bottom = 3
+	slider.add_theme_stylebox_override("slider", track)
+	slider.add_theme_stylebox_override("grabber_area", _style(Color("159fc7"), 3))
+	slider.add_theme_stylebox_override("grabber_area_highlight", _style(Color("159fc7"), 3))
+	for state: String in ["grabber", "grabber_highlight", "grabber_disabled"]:
+		slider.add_theme_icon_override(state, preload("res://assets/ui/slider.svg"))
+	slider.value_changed.connect(func(value: float):
+		sensitivity_label.text = "Чувствительность  ×%.1f" % value
+		sensitivity_changed.emit(value))
+	frame.add_child(slider)
+	feedback_toggle = CheckButton.new()
+	feedback_toggle.position = Vector2(80, 624)
+	feedback_toggle.size = Vector2(560, 76)
+	feedback_toggle.text = "Наклонять поле вслед за телефоном"
+	feedback_toggle.button_pressed = feedback
+	feedback_toggle.add_theme_font_size_override("font_size", 24)
+	for state: String in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		feedback_toggle.add_theme_color_override(state, INK)
+	feedback_toggle.add_theme_icon_override("checked", preload("res://assets/ui/toggle_on.svg"))
+	feedback_toggle.add_theme_icon_override("unchecked", preload("res://assets/ui/toggle_off.svg"))
+	feedback_toggle.toggled.connect(func(value: bool): feedback_changed.emit(value))
+	frame.add_child(feedback_toggle)
+	var zero := _button("Калибровать наклон", Rect2(80, 750, 560, 88), false, func(): calibrate_requested.emit(), frame, "calibrate")
+	zero.disabled = not sensor
+	_calibration_status = _label("Держите телефон удобно и нажмите кнопку." if sensor else "Датчик не найден. Доступно касание экрана.", Vector2(80, 864), 22, MUTED, false, frame)
+	_label("Касание: ведите пальцем по игровому полю.\nНаклон калибруется также при нажатии «Играть».", Vector2(80, 964), 22, MUTED, false, frame)
 
 
-func update_state(fraction: float, tilt: Vector2, sensor: bool, running: bool) -> void:
-	progress.value = fraction * 100.0
-	percent.text = "%d%%" % floori(fraction * 100.0)
-	pad.indicator = tilt
-	pad.active = running and (_use_touch or not sensor)
-	pad.queue_redraw()
-	pause_button.disabled = not running and _modal != null
-	if not sensor and not _use_touch:
-		mode_button.text = "Касание"
-		pad.active = running
-	else:
-		mode_button.text = "Касание" if _use_touch else "Наклон"
-	zero_button.disabled = not sensor or _use_touch
-	if _modal == null and Time.get_ticks_msec() > _toast_until:
-		if sensor and not _use_touch:
-			hint.text = "Плавно наклоняйте телефон · Ноль — калибровка"
-		else:
-			hint.text = "Управляйте кругом справа или клавишами WASD / ↑↓←→"
+func calibration_done() -> void:
+	if is_instance_valid(_calibration_status):
+		_calibration_status.text = "Удобное положение сохранено."
 
 
-func show_intro() -> void:
-	_modal_card("01 / ПЕРВЫЙ ПОТОК", "У воды свой путь", "Проведите воду по каналу в красный сосуд.\nДля победы соберите не менее 80%.\n\nДержите телефон удобно и нажмите «Начать»: \nэто положение станет нулём наклона.", "Начать", func():
-		hide_modal()
-		start_requested.emit(), false)
+func show_about() -> void:
+	var frame := _page_header("Об игре")
+	_label("Гидрологика / Hydrologic", Vector2(80, 320), 31, INK, true, frame)
+	_label("Направляйте воду наклоном телефона.\nПроведите поток по спирали в красный сосуд.\nДля победы доставьте не менее 80% воды.\n\nПауза останавливает поток.\nИз неё можно начать заново или вернуться\nв главное меню.\n\nВода — первая жидкость прототипа.\nДальше — новые свойства и взаимодействия.", Vector2(80, 400), 24, MUTED, false, frame)
+	_label("Версия 0.2.0\nGodot · MIT   /   Noto Sans · SIL OFL", Vector2(80, 1016), 21, MUTED, false, frame)
+
+
+func _page_header(title: String) -> Control:
+	_clear_page()
+	pause_button.hide()
+	page = _layer()
+	var frame := _frame(page)
+	_button("‹  Главное меню", Rect2(48, 110, 300, 88), false, func(): menu_requested.emit(), frame, "back")
+	_label(title, Vector2(80, 224), 44, INK, true, frame)
+	return frame
 
 
 func show_pause() -> void:
-	pad.reset()
-	_modal_card("ПАУЗА", "Можно выдохнуть", "Поток остановлен.\n\n«Ноль наклона» запоминает удобное положение.\nНа компьютере работают WASD и стрелки.", "Продолжить", func():
-		hide_modal()
-		resume_requested.emit(), true)
+	field.active = false
+	field.reset()
+	var frame := _modal_card("Пауза", 540)
+	_button("Продолжить", Rect2(96, 510, 528, 88), true, func(): resume_requested.emit(), frame, "resume")
+	_button("Начать заново", Rect2(96, 616, 528, 88), false, func(): restart_requested.emit(), frame, "restart")
+	_button("Выйти", Rect2(96, 722, 528, 88), false, func(): menu_requested.emit(), frame, "exit")
 
 
 func show_win(fraction: float) -> void:
-	pad.reset()
-	_modal_card("ПОТОК ДОСТАВЛЕН", "Отличное течение", "В приёмнике %d%% воды. Цель — 80%%.\n\nПервый уровень пройден.\nДальше — новые формы и свойства жидкости." % floori(fraction * 100.0), "Пройти ещё раз", func():
-		hide_modal()
-		restart_requested.emit(), false)
+	field.active = false
+	field.reset()
+	var frame := _modal_card("Уровень пройден", 480)
+	_center_label("В сосуде %d%% воды" % floori(fraction * 100.0), 490, 24, MUTED, false, frame)
+	_button("Ещё раз", Rect2(96, 574, 528, 88), true, func(): restart_requested.emit(), frame, "replay")
+	_button("В главное меню", Rect2(96, 680, 528, 88), false, func(): menu_requested.emit(), frame, "win_menu")
+
+
+func _modal_card(title: String, height: float) -> Control:
+	hide_modal()
+	_modal = _layer(0.64)
+	var frame := _frame(_modal)
+	var panel := Panel.new()
+	panel.position = Vector2(56, 370)
+	panel.size = Vector2(608, height)
+	var style := _style(Color("fcfefd"), 16)
+	style.shadow_size = 22
+	style.shadow_color = Color(0.1, 0.2, 0.25, 0.12)
+	panel.add_theme_stylebox_override("panel", style)
+	frame.add_child(panel)
+	_center_label(title, 416, 38, INK, true, frame)
+	return frame
 
 
 func hide_modal() -> void:
-	if _modal != null:
-		# Stay in the tree until the current native touch/mouse event has finished
-		# propagating through Godot's GUI path.
+	if is_instance_valid(_modal):
 		_modal.hide()
 		_modal.queue_free()
-		_modal = null
+	_modal = null
 
 
-func toast(message: String) -> void:
-	hint.text = message
-	_toast_until = Time.get_ticks_msec() + 2000
+func _center_label(text: String, y: float, font_size: int, color: Color, bold: bool, parent: Node) -> Label:
+	var label := _label(text, Vector2(40, y), font_size, color, bold, parent)
+	label.size.x = 640
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	return label
 
 
-func _toggle_mode() -> void:
-	_use_touch = not _use_touch
-	pad.reset()
-	mode_changed.emit(_use_touch)
-
-
-func _modal_card(kicker: String, title: String, body: String, action: String, callback: Callable, with_restart: bool) -> void:
-	hide_modal()
-	_modal = Control.new()
-	_modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(_modal)
-	var veil := ColorRect.new()
-	veil.color = Color(0.91, 0.95, 0.95, 0.78)
-	veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_modal.add_child(veil)
-	var card := Panel.new()
-	card.position = Vector2(40, 408)
-	card.size = Vector2(640, 506 if with_restart else 466)
-	var style := _style(Color("fcfefd"), 12)
-	style.shadow_color = Color(0.1, 0.22, 0.26, 0.10)
-	style.shadow_size = 26
-	style.shadow_offset = Vector2(0, 10)
-	card.add_theme_stylebox_override("panel", style)
-	_modal.add_child(card)
-	_label(kicker, Vector2(76, 440), 17, RED, true, _modal)
-	_label(title, Vector2(72, 477), 35, INK, true, _modal)
-	_label(body, Vector2(76, 548), 20, MUTED, false, _modal)
-	_button(action, Rect2(76, 748, 568, 84), true, callback, _modal)
-	if with_restart:
-		_button("Начать заново", Rect2(76, 844, 568, 52), false, func():
-			hide_modal()
-			restart_requested.emit(), _modal)
-
-
-func _label(text: String, at: Vector2, font_size: int, color: Color, bold: bool = false, parent: Node = self) -> Label:
+func _label(text: String, at: Vector2, font_size: int, color: Color, bold: bool, parent: Node) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.position = at
@@ -185,23 +263,27 @@ func _label(text: String, at: Vector2, font_size: int, color: Color, bold: bool 
 	return label
 
 
-func _button(text: String, bounds: Rect2, primary: bool, callback: Callable, parent: Node = self) -> Button:
+func _button(text: String, bounds: Rect2, primary: bool, callback: Callable, parent: Node, id: String) -> Button:
 	var button := Button.new()
 	button.text = text
 	button.position = bounds.position
 	button.size = bounds.size
 	button.add_theme_font_override("font", BOLD)
-	button.add_theme_font_size_override("font_size", 20)
-	button.add_theme_color_override("font_color", Color.WHITE if primary else INK)
-	button.add_theme_color_override("font_hover_color", Color.WHITE if primary else INK)
-	button.add_theme_color_override("font_pressed_color", Color.WHITE if primary else INK)
-	button.add_theme_stylebox_override("normal", _style(RED if primary else Color("e6edef"), 8))
-	button.add_theme_stylebox_override("hover", _style(Color("d43b35") if primary else Color("d9e4e7"), 8))
-	button.add_theme_stylebox_override("pressed", _style(Color("bf3833") if primary else Color("cbdce0"), 8))
-	button.add_theme_stylebox_override("disabled", _style(Color("edf2f2"), 8))
-	button.add_theme_stylebox_override("focus", _outline())
+	button.add_theme_font_size_override("font_size", 26)
+	for state: String in ["font_color", "font_hover_color", "font_pressed_color"]:
+		button.add_theme_color_override(state, Color.WHITE if primary else INK)
+	button.add_theme_stylebox_override("normal", _style(RED if primary else Color("e3ebed"), 10))
+	button.add_theme_stylebox_override("hover", _style(Color("d43b35") if primary else Color("d9e4e7"), 10))
+	button.add_theme_stylebox_override("pressed", _style(Color("bf3833") if primary else Color("cbdce0"), 10))
+	button.add_theme_stylebox_override("disabled", _style(Color("edf2f2"), 10))
+	button.add_theme_color_override("font_disabled_color", MUTED.lightened(0.25))
+	var focus := _style(Color.TRANSPARENT, 10)
+	focus.border_color = Color("159fc7")
+	focus.set_border_width_all(2)
+	button.add_theme_stylebox_override("focus", focus)
 	button.pressed.connect(callback)
 	parent.add_child(button)
+	buttons[id] = button
 	return button
 
 
@@ -210,19 +292,3 @@ static func _style(color: Color, radius: int) -> StyleBoxFlat:
 	style.bg_color = color
 	style.set_corner_radius_all(radius)
 	return style
-
-
-static func _outline() -> StyleBoxFlat:
-	var style := _style(Color.TRANSPARENT, 8)
-	style.border_color = Color("159fc7")
-	style.set_border_width_all(2)
-	return style
-
-
-func _line(bounds: Rect2, color: Color) -> void:
-	var line := ColorRect.new()
-	line.position = bounds.position
-	line.size = bounds.size
-	line.color = color
-	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(line)
