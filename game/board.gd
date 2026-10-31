@@ -16,24 +16,20 @@ static func _material(color: Color, roughness: float) -> StandardMaterial3D:
 func build(level: LevelDefinition) -> void:
 	var bounds := level.board_bounds
 	var middle := bounds.get_center()
-	_box(Vector3(bounds.size.x + 0.10, 0.14, bounds.size.y + 0.10), Vector3(middle.x, -0.46, middle.y), _material(Color("b3c4c7"), 0.9))
-	_box(Vector3(bounds.size.x, 0.40, bounds.size.y), Vector3(middle.x, -0.25, middle.y), _white)
-	_floor_polygon(level.outline, 0.005, _floor)
-	for i: int in range(level.outline.size()):
-		var a := level.outline[i]
-		var b := level.outline[(i + 1) % level.outline.size()]
-		var center := (a + b) * 0.5
-		var wall := _box(Vector3(a.distance_to(b) + 0.10, 0.30, 0.10), Vector3(center.x, 0.15, center.y), _white)
-		wall.rotation.y = -atan2(b.y - a.y, b.x - a.x)
-	# The vessel is part of the board: red rails and an end cap, no HUD labels.
+	_box(Vector3(bounds.size.x + 0.10, 0.12, bounds.size.y + 0.10), Vector3(middle.x, level.base_height - 0.06, middle.y), _material(Color("b3c4c7"), 0.9))
+	for tile: Dictionary in level.terrain_tiles():
+		var rectangle: Rect2 = tile.bounds
+		var center := rectangle.get_center()
+		var height: float = tile.height
+		_box(Vector3(rectangle.size.x, height - level.base_height, rectangle.size.y), Vector3(center.x, (height + level.base_height) * 0.5, center.y), _white)
+		if tile.channel:
+			_box(Vector3(rectangle.size.x, 0.008, rectangle.size.y), Vector3(center.x, height + 0.004, center.y), _floor)
 	var goal := level.goal
-	_box(Vector3(goal.size.x + 0.16, 0.045, 0.13), Vector3(goal.get_center().x, 0.323, goal.end.y + 0.02), _red)
+	var top := level.board_top + 0.02
+	_box(Vector3(goal.size.x + 0.15, 0.045, 0.12), Vector3(goal.get_center().x, top, goal.end.y + 0.02), _red)
 	for x: float in [goal.position.x - 0.02, goal.end.x + 0.02]:
-		_box(Vector3(0.13, 0.045, goal.size.y), Vector3(x, 0.323, goal.get_center().y), _red)
-	# A few quiet architectural joints; nothing intrudes into the channel.
-	for z: float in [-3.0, -1.0, 1.0, 3.0]:
-		_box(Vector3(0.20, 0.008, 0.012), Vector3(bounds.position.x + 0.13, -0.044, z), _floor)
-	_box(Vector3(0.045, 0.012, 0.65), Vector3(bounds.position.x + 0.12, -0.04, -3.7), _material(Color("299ec2"), 0.6))
+		_box(Vector3(0.12, 0.045, goal.size.y), Vector3(x, top, goal.get_center().y), _red)
+	_box(Vector3(0.045, 0.012, 0.65), Vector3(bounds.position.x + 0.12, level.board_top + 0.009, -3.7), _material(Color("299ec2"), 0.6))
 
 
 func _box(size: Vector3, center: Vector3, material: Material) -> MeshInstance3D:
@@ -45,20 +41,3 @@ func _box(size: Vector3, center: Vector3, material: Material) -> MeshInstance3D:
 	instance.position = center
 	add_child(instance)
 	return instance
-
-
-func _floor_polygon(polygon: PackedVector2Array, height: float, material: Material) -> void:
-	var indices := Geometry2D.triangulate_polygon(polygon)
-	var surface := SurfaceTool.new()
-	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
-	surface.set_material(material)
-	for i: int in indices:
-		surface.set_normal(Vector3.UP)
-		surface.add_vertex(Vector3(polygon[i].x, height, polygon[i].y))
-	var instance := MeshInstance3D.new()
-	instance.mesh = surface.commit()
-	# Both sides render: polygon conventions must not hide the basin on GLES.
-	var two_sided := material.duplicate() as StandardMaterial3D
-	two_sided.cull_mode = BaseMaterial3D.CULL_DISABLED
-	instance.material_override = two_sided
-	add_child(instance)

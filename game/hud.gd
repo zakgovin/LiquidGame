@@ -95,10 +95,10 @@ func _frame(parent: Control) -> Control:
 func show_menu(level_title: String) -> void:
 	_clear_page()
 	pause_button.hide()
-	page = _layer(0.94)
+	page = _layer(1.0)
 	var frame := _frame(page)
 	var icon := TextureRect.new()
-	icon.texture = preload("res://assets/icon.svg")
+	icon.texture = preload("res://assets/icon.png")
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.position = Vector2(296, 230)
@@ -178,7 +178,7 @@ func show_settings(sensitivity: float, use_touch: bool, feedback: bool, sensor: 
 	var zero := _button("Калибровать наклон", Rect2(80, 750, 560, 88), false, func(): calibrate_requested.emit(), frame, "calibrate")
 	zero.disabled = not sensor
 	_calibration_status = _label("Держите телефон удобно и нажмите кнопку." if sensor else "Датчик не найден. Доступно касание экрана.", Vector2(80, 864), 22, MUTED, false, frame)
-	_label("Касание: ведите пальцем по игровому полю.\nНаклон калибруется также при нажатии «Играть».", Vector2(80, 964), 22, MUTED, false, frame)
+	_label("Первые 6° — спокойная зона. Полный наклон — 36°.\nКасание: ведите пальцем по игровому полю.\nПоложение запоминается при нажатии «Играть».", Vector2(80, 964), 21, MUTED, false, frame)
 
 
 func calibration_done() -> void:
@@ -190,7 +190,8 @@ func show_about() -> void:
 	var frame := _page_header("Об игре")
 	_label("Гидрологика / Hydrologic", Vector2(80, 320), 31, INK, true, frame)
 	_label("Направляйте воду наклоном телефона.\nПроведите поток по спирали в красный сосуд.\nДля победы доставьте не менее 80% воды.\n\nПауза останавливает поток.\nИз неё можно начать заново или вернуться\nв главное меню.\n\nВода — первая жидкость прототипа.\nДальше — новые свойства и взаимодействия.", Vector2(80, 400), 24, MUTED, false, frame)
-	_label("Версия 0.2.0\nGodot · MIT   /   Noto Sans · SIL OFL", Vector2(80, 1016), 21, MUTED, false, frame)
+	_label("Авторы игры\nZak Govin и Codex (OpenAI)", Vector2(80, 904), 24, INK, false, frame)
+	_label("Версия 0.3.0\nGodot · MIT   /   Noto Sans · SIL OFL", Vector2(80, 1060), 21, MUTED, false, frame)
 
 
 func _page_header(title: String) -> Control:
@@ -219,6 +220,15 @@ func show_win(fraction: float) -> void:
 	_center_label("В сосуде %d%% воды" % floori(fraction * 100.0), 490, 24, MUTED, false, frame)
 	_button("Ещё раз", Rect2(96, 574, 528, 88), true, func(): restart_requested.emit(), frame, "replay")
 	_button("В главное меню", Rect2(96, 680, 528, 88), false, func(): menu_requested.emit(), frame, "win_menu")
+
+
+func show_failure() -> void:
+	field.active = false
+	field.reset()
+	var frame := _modal_card("Вода расплескалась", 480)
+	_center_label("Оставшегося объёма недостаточно", 490, 23, MUTED, false, frame)
+	_button("Начать заново", Rect2(96, 574, 528, 88), true, func(): restart_requested.emit(), frame, "retry")
+	_button("В главное меню", Rect2(96, 680, 528, 88), false, func(): menu_requested.emit(), frame, "fail_menu")
 
 
 func _modal_card(title: String, height: float) -> Control:

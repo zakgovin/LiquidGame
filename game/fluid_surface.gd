@@ -1,101 +1,156 @@
 class_name FluidSurface
 extends MeshInstance3D
-## An implicit surface joins neighboring particles into continuous water.
-## Marching squares at 30 Hz. No per-particle Nodes or draw calls.
+## Genuine volumetric surface: sparse active cells in a 3D scalar field,
+## marching tetrahedra and smooth density-gradient normals. No fixed water plane.
 
-const CELL: float = 0.095
-const ORIGIN := Vector2(-3.25, -4.85)
-const WIDTH: int = 72
-const HEIGHT: int = 104
-const ISO: float = 0.50
-const RADIUS: float = 0.195
-const POLYGONS: Array = [
-	[], [[0, 4, 7]], [[1, 5, 4]], [[0, 1, 5, 7]],
-	[[2, 6, 5]], [[0, 4, 7], [2, 6, 5]], [[1, 2, 6, 4]], [[0, 1, 2, 6, 7]],
-	[[3, 7, 6]], [[0, 4, 6, 3]], [[1, 5, 4], [3, 7, 6]], [[0, 1, 5, 6, 3]],
-	[[2, 3, 7, 5]], [[0, 4, 5, 2, 3]], [[4, 1, 2, 3, 7]], [[0, 1, 2, 3]]
-]
+const CELL: float = 0.075
+const ORIGIN := Vector3(-3.6, -1.5, -5.5)
+const NX: int = 98
+const NZ: int = 148
+const NY: int = 56
+const SLICE: int = NX * NZ
+const COUNT: int = SLICE * NY
+const ISO: float = 0.65
+const RADIUS: float = 0.18
+const CORNERS := [0, 1, NX + 1, NX, SLICE, SLICE + 1, SLICE + NX + 1, SLICE + NX]
+const CELL_OFFSETS := [0, -1, -NX, -NX - 1, -SLICE, -SLICE - 1, -SLICE - NX, -SLICE - NX - 1]
+const TETS := [[0, 5, 1, 6], [0, 1, 2, 6], [0, 2, 3, 6], [0, 3, 7, 6], [0, 7, 4, 6], [0, 4, 5, 6]]
+const EDGES := [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]]
+const TRIANGLES := [[], [0, 3, 2], [0, 1, 4], [1, 4, 2, 2, 4, 3], [1, 2, 5], [0, 3, 5, 0, 5, 1], [0, 2, 5, 0, 5, 4], [5, 4, 3], [3, 4, 5], [4, 5, 0, 5, 2, 0], [1, 5, 0, 5, 3, 0], [5, 2, 1], [3, 4, 2, 2, 4, 1], [4, 1, 0], [2, 3, 0], []]
 
 var _field := PackedFloat32Array()
+var _gradients := PackedVector3Array()
+var _flags := PackedByteArray()
+var _touched := PackedInt32Array()
+var _cells := PackedInt32Array()
+var _floor := PackedFloat32Array()
+var _cached_level: LevelDefinition
+var _values := PackedFloat32Array()
+var _points := PackedVector3Array()
+var _point_normals := PackedVector3Array()
+var _edge_points := PackedVector3Array()
+var _edge_normals := PackedVector3Array()
 var _vertices := PackedVector3Array()
 var _normals := PackedVector3Array()
-var _points := PackedVector3Array()
 var _mesh := ArrayMesh.new()
 
 
 func _init(profile: LiquidProfile = null) -> void:
-	_field.resize(WIDTH * HEIGHT)
+	_values.resize(8)
 	_points.resize(8)
+	_point_normals.resize(8)
+	_edge_points.resize(6)
+	_edge_normals.resize(6)
 	mesh = _mesh
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var shader_material := ShaderMaterial.new()
-	shader_material.shader = preload("res://assets/materials/water.gdshader")
-	if profile != null:
-		shader_material.set_shader_parameter("water_color", profile.color)
-	material_override = shader_material
+	var water := ShaderMaterial.new()
+	water.shader = preload("res://assets/materials/water.gdshader")
+	if profile != null: water.set_shader_parameter("water_color", profile.color)
+	material_override = water
 
 
-func rebuild(particles: PackedVector2Array, level: LevelDefinition) -> void:
-	_field.fill(0.0)
-	for point: Vector2 in particles:
-		var center := (point - ORIGIN) / CELL
-		for gy: int in range(maxi(0, floori(center.y) - 2), mini(HEIGHT, ceili(center.y) + 3)):
-			for gx: int in range(maxi(0, floori(center.x) - 2), mini(WIDTH, ceili(center.x) + 3)):
-				var sample_point := ORIGIN + Vector2(gx, gy) * CELL
-				var d := sample_point.distance_squared_to(point) / (RADIUS * RADIUS)
-				if d < 1.0:
-					_field[gy * WIDTH + gx] += (1.0 - d) * (1.0 - d)
-	# Keep the visual meniscus within the same walls as the physical particles.
-	for gy: int in range(HEIGHT):
-		for gx: int in range(WIDTH):
-			if _field[gy * WIDTH + gx] > 0.0 and not level.contains(ORIGIN + Vector2(gx, gy) * CELL, 0.01):
-				_field[gy * WIDTH + gx] = 0.0
+func rebuild(particles: PackedVector3Array, level: LevelDefinition, active: PackedByteArray = PackedByteArray(), solver: RefCounted = null) -> void:
+	if solver != null:
+		var data: Dictionary = solver.call("build_surface")
+		_mesh.clear_surfaces()
+		var vertices: PackedVector3Array = data.vertices
+		if vertices.is_empty(): return
+		var arrays: Array = []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = vertices
+		arrays[Mesh.ARRAY_NORMAL] = data.normals
+		_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		return
+	if _field.is_empty():
+		_field.resize(COUNT)
+		_gradients.resize(COUNT)
+		_flags.resize(COUNT)
+		_floor.resize(SLICE)
+	for index: int in _touched:
+		_field[index] = 0.0
+		_gradients[index] = Vector3.ZERO
+	for index: int in _cells: _flags[index] = 0
+	_touched.clear()
+	_cells.clear()
+	if _cached_level != level:
+		_cached_level = level
+		for iz: int in range(NZ):
+			for ix: int in range(NX):
+				_floor[iz * NX + ix] = level.floor_height(Vector2(ORIGIN.x + ix * CELL, ORIGIN.z + iz * CELL))
+	var radius2 := RADIUS * RADIUS
+	for i: int in range(particles.size()):
+		if not active.is_empty() and active[i] == 0: continue
+		var p := particles[i]
+		var center := (p - ORIGIN) / CELL
+		for iy: int in range(maxi(1, floori(center.y) - 2), mini(NY - 1, ceili(center.y) + 3)):
+			var y := ORIGIN.y + iy * CELL
+			var dy := y - p.y
+			if dy * dy >= radius2: continue
+			for iz: int in range(maxi(1, floori(center.z) - 2), mini(NZ - 1, ceili(center.z) + 3)):
+				var dz := ORIGIN.z + iz * CELL - p.z
+				var yz2 := dy * dy + dz * dz
+				if yz2 >= radius2: continue
+				for ix: int in range(maxi(1, floori(center.x) - 2), mini(NX - 1, ceili(center.x) + 3)):
+					var plane_index := iz * NX + ix
+					if y < _floor[plane_index] + 0.002: continue
+					var dx := ORIGIN.x + ix * CELL - p.x
+					var q := 1.0 - (dx * dx + yz2) / radius2
+					if q <= 0.0: continue
+					var index := iy * SLICE + plane_index
+					if _field[index] == 0.0: _touched.append(index)
+					_field[index] += q * q * q
+					_gradients[index] += Vector3(dx, dy, dz) * (-6.0 * q * q / radius2)
+					for offset: int in CELL_OFFSETS:
+						var cell := index + offset
+						if _flags[cell] == 0:
+							_flags[cell] = 1
+							_cells.append(cell)
 	_vertices.clear()
 	_normals.clear()
-	for gy: int in range(HEIGHT - 1):
-		for gx: int in range(WIDTH - 1):
-			var index := gy * WIDTH + gx
-			var values := [_field[index], _field[index + 1], _field[index + WIDTH + 1], _field[index + WIDTH]]
-			var mask := 0
-			for corner: int in range(4):
-				if values[corner] >= ISO:
-					mask |= 1 << corner
-			if mask == 0:
-				continue
-			var x := ORIGIN.x + gx * CELL
-			var z := ORIGIN.y + gy * CELL
-			_points[0] = Vector3(x, 0.06, z)
-			_points[1] = Vector3(x + CELL, 0.06, z)
-			_points[2] = Vector3(x + CELL, 0.06, z + CELL)
-			_points[3] = Vector3(x, 0.06, z + CELL)
-			for edge: int in range(4):
-				var next := (edge + 1) % 4
-				var denominator: float = values[next] - values[edge]
-				var t := 0.5 if absf(denominator) < 0.0001 else clampf((ISO - values[edge]) / denominator, 0.0, 1.0)
-				_points[4 + edge] = _points[edge].lerp(_points[next], t)
-			for polygon: Array in POLYGONS[mask]:
-				for triangle: int in range(1, polygon.size() - 1):
-					for vertex: int in [polygon[0], polygon[triangle], polygon[triangle + 1]]:
-						_vertices.append(_points[vertex])
-						_normals.append(Vector3.UP)
-				# Vertical meniscus closes the surface down to the channel floor.
-				for edge: int in range(polygon.size()):
-					var a: int = polygon[edge]
-					var b: int = polygon[(edge + 1) % polygon.size()]
-					if a >= 4 and b >= 4:
-						var top_a := _points[a]
-						var top_b := _points[b]
-						var bottom_a := Vector3(top_a.x, 0.02, top_a.z)
-						var bottom_b := Vector3(top_b.x, 0.02, top_b.z)
-						var normal := (top_b - top_a).cross(Vector3.UP).normalized()
-						for vertex: Vector3 in [top_a, bottom_a, bottom_b, top_a, bottom_b, top_b]:
-							_vertices.append(vertex)
-							_normals.append(normal)
+	for index: int in _cells:
+		var mask := 0
+		for corner: int in range(8):
+			var node: int = index + CORNERS[corner]
+			_values[corner] = _field[node]
+			if _values[corner] >= ISO: mask |= 1 << corner
+		if mask == 0 or mask == 255: continue
+		for corner: int in range(8):
+			var node: int = index + CORNERS[corner]
+			var iy := node / SLICE
+			var plane := node % SLICE
+			_points[corner] = ORIGIN + Vector3(plane % NX, iy, plane / NX) * CELL
+			_point_normals[corner] = -_gradients[node]
+		for tet: Array in TETS:
+			var tetra_mask := 0
+			for vertex: int in range(4):
+				if _values[tet[vertex]] >= ISO: tetra_mask |= 1 << vertex
+			var triangles: Array = TRIANGLES[tetra_mask]
+			if triangles.is_empty(): continue
+			for edge: int in range(6):
+				var a: int = tet[EDGES[edge][0]]
+				var b: int = tet[EDGES[edge][1]]
+				if (_values[a] >= ISO) == (_values[b] >= ISO): continue
+				var t := clampf((ISO - _values[a]) / (_values[b] - _values[a]), 0.0, 1.0)
+				_edge_points[edge] = _points[a].lerp(_points[b], t)
+				var normal := _point_normals[a].lerp(_point_normals[b], t)
+				_edge_normals[edge] = normal.normalized() if normal.length_squared() > 0.000001 else Vector3.UP
+			for triangle: int in range(0, triangles.size(), 3):
+				_triangle(triangles[triangle], triangles[triangle + 1], triangles[triangle + 2])
 	_mesh.clear_surfaces()
-	if _vertices.is_empty():
-		return
+	if _vertices.is_empty(): return
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = _vertices
 	arrays[Mesh.ARRAY_NORMAL] = _normals
 	_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+
+func _triangle(a: int, b: int, c: int) -> void:
+	var face := (_edge_points[b] - _edge_points[a]).cross(_edge_points[c] - _edge_points[a])
+	if face.dot(_edge_normals[a] + _edge_normals[b] + _edge_normals[c]) > 0.0:
+		var swap := b
+		b = c
+		c = swap
+	for vertex: int in [a, b, c]:
+		_vertices.append(_edge_points[vertex])
+		_normals.append(_edge_normals[vertex])

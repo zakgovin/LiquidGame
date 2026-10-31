@@ -1,6 +1,6 @@
 extends Node3D
 
-enum Screen { MENU, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, WON }
+enum Screen { MENU, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, WON, FAILED }
 const LEVEL: LevelDefinition = preload("res://resources/first_level.tres")
 const WATER: LiquidProfile = preload("res://resources/water.tres")
 const MAX_TILT: float = PI / 45.0 # Four degrees; purely visual, never a second gravity.
@@ -29,7 +29,7 @@ func _ready() -> void:
 	simulation = LiquidSimulation.new(LEVEL, WATER)
 	surface = FluidSurface.new(WATER)
 	pivot.add_child(surface)
-	surface.rebuild(simulation.positions, LEVEL)
+	surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
 	var canvas := CanvasLayer.new()
 	add_child(canvas)
 	hud = HydrologicHUD.new()
@@ -71,12 +71,16 @@ func _physics_process(delta: float) -> void:
 		simulation.step(delta, tilt)
 		_render_tick += 1
 		if _render_tick % 2 == 0:
-			surface.rebuild(simulation.positions, LEVEL)
+			surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
 		hud.field.active = controls.use_touch or not controls.has_sensor
 		if simulation.completed:
 			running = false
 			screen = Screen.WON
 			hud.show_win(simulation.goal_fraction)
+		elif simulation.is_unwinnable():
+			running = false
+			screen = Screen.FAILED
+			hud.show_failure()
 	var target := Vector3.ZERO
 	if tilt_feedback and screen == Screen.PLAYING:
 		target = Vector3(tilt.y * MAX_TILT, 0.0, -tilt.x * MAX_TILT)
@@ -95,7 +99,8 @@ func _start() -> void:
 
 func _restart() -> void:
 	simulation.reset()
-	surface.rebuild(simulation.positions, LEVEL)
+	surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
+	pivot.show()
 	controls.filtered = Vector2.ZERO
 	controls.touch = Vector2.ZERO
 	pivot.rotation = Vector3.ZERO
@@ -124,6 +129,7 @@ func _resume() -> void:
 func _menu() -> void:
 	running = false
 	screen = Screen.MENU
+	pivot.hide()
 	controls.touch = Vector2.ZERO
 	controls.filtered = Vector2.ZERO
 	hud.show_menu(LEVEL.title)
@@ -132,6 +138,7 @@ func _menu() -> void:
 func _settings() -> void:
 	running = false
 	screen = Screen.SETTINGS
+	pivot.hide()
 	controls.sensor_vector()
 	hud.show_settings(controls.sensitivity, controls.use_touch, tilt_feedback, controls.has_sensor)
 
@@ -139,12 +146,14 @@ func _settings() -> void:
 func _levels() -> void:
 	running = false
 	screen = Screen.LEVELS
+	pivot.hide()
 	hud.show_levels(LEVEL.title)
 
 
 func _about() -> void:
 	running = false
 	screen = Screen.ABOUT
+	pivot.hide()
 	hud.show_about()
 
 
@@ -157,7 +166,7 @@ func _back() -> void:
 	match screen:
 		Screen.PLAYING: _pause()
 		Screen.PAUSED: _resume()
-		Screen.SETTINGS, Screen.LEVELS, Screen.ABOUT, Screen.WON: _menu()
+		Screen.SETTINGS, Screen.LEVELS, Screen.ABOUT, Screen.WON, Screen.FAILED: _menu()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -209,10 +218,10 @@ func _setup_environment() -> void:
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
 	camera.size = 6.95
-	camera.position = Vector3(0, 18, 7)
+	camera.position = Vector3(0, 18, 8)
 	camera.far = 100.0
 	add_child(camera)
-	camera.look_at(Vector3.ZERO)
+	camera.look_at(Vector3(0, 0.25, 0))
 	camera.current = true
 
 

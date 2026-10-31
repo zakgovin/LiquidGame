@@ -1,17 +1,16 @@
 class_name LiquidProfile
 extends Resource
-## Material parameters independent of levels. Only water is shipped in v0.1.
-## A future multi-material solver must explicitly implement mixing/separation rules.
+## Volumetric fluid parameters, separate from level geometry. Density is the
+## dimensionless kernel rest density, not a claim about physical kg/m³.
 
 @export var display_name: String = "Вода"
 @export var symbol: String = "H₂O"
 @export var color: Color = Color("16b3df")
-@export_range(0.1, 10.0) var rest_density: float = 2.5
-@export var pressure_stiffness: float = 170.0
-@export var near_pressure_stiffness: float = 230.0
-@export_range(0.0, 5.0) var viscosity: float = 0.18
-@export var interaction_radius: float = 0.25
+@export var rest_density: float = 6.8
+@export var viscosity: float = 1.0
+@export var interaction_radius: float = 0.22
+@export var particle_spacing: float = 0.10
 @export var particle_radius: float = 0.052
-@export_range(0.0, 100.0) var cohesion_pressure: float = 3.0
-@export_range(0.0, 5.0) var drag: float = 0.12
-@export var max_speed: float = 5.5
+@export var drag: float = 0.04
+@export var max_speed: float = 2.2
+@export_range(2, 6) var solver_iterations: int = 3

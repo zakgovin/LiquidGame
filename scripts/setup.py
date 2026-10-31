@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verified, local Godot 4.6.3 / Android export tools. No pip dependencies."""
+"""Verified, local Godot 4.6.3 / Android export and native build tools."""
 import argparse
 import hashlib
 import os
@@ -41,8 +41,18 @@ def extract(archive, destination, prefixes=None):
         for member in z.infolist():
             if prefixes and member.filename not in prefixes:
                 continue
-            z.extract(member, destination)
             mode = member.external_attr >> 16
+            if stat.S_ISLNK(mode):
+                output = destination / member.filename
+                target = z.read(member).decode()
+                if not (output.parent / target).resolve().is_relative_to(destination.resolve()):
+                    raise RuntimeError("Archive symlink leaves installation directory")
+                output.parent.mkdir(parents=True, exist_ok=True)
+                if output.is_symlink() or output.exists():
+                    output.unlink()
+                output.symlink_to(target)
+                continue
+            z.extract(member, destination)
             if mode & stat.S_IXUSR:
                 (destination / member.filename).chmod(0o755)
 
@@ -63,6 +73,8 @@ def main():
             extract(download(name, BASE + name, ARTIFACTS[name]), binary.parent)
     print(f"Godot: {binary}", flush=True)
     if not args.android:
+        from build_native import build
+        build()
         return
     templates = ROOT / "data/godot/export_templates/4.6.3.stable"
     if not (templates / "android_debug.apk").exists():
@@ -126,6 +138,8 @@ export/android/debug_keystore_pass = "android"
 export/android/shutdown_adb_on_exit = false
 ''')
     print("Android APK export tools ready (debug signing only).", flush=True)
+    from build_native import build
+    build(android=True)
 
 
 if __name__ == "__main__":
