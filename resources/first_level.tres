@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="LevelDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://game/level_definition.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+title = "Первый поток"
+floor_regions = Array[Rect2]([Rect2(-2.8, -4, 2.6, 2.8), Rect2(-2.8, -1.6, 2.6, 3.2), Rect2(-2.8, 0.6, 5.15, 1.6), Rect2(0.5, 1.5, 2.6, 2.5)])
+outline = PackedVector2Array(-2.8, -4, -0.2, -4, -0.2, 0.6, 2.35, 0.6, 2.35, 1.5, 3.1, 1.5, 3.1, 4, 0.5, 4, 0.5, 2.2, -2.8, 2.2)
+spawn = Rect2(-2.58, -3.75, 2.12, 1.9)
+goal = Rect2(0.58, 2.25, 2.44, 1.67)
+particle_count = 288
+required_fraction = 0.8
+hold_seconds = 0.75

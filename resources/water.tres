@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="LiquidProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://game/liquid_profile.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+display_name = "Вода"
+symbol = "H₂O"
+color = Color(0.035, 0.59, 0.82, 1)
+rest_density = 2.5
+pressure_stiffness = 170.0
+near_pressure_stiffness = 230.0
+viscosity = 0.18
+interaction_radius = 0.25
+particle_radius = 0.052

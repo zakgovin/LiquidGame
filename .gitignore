@@ -1,0 +1,9 @@
+.godot/
+build/
+.DS_Store
+*.keystore
+*.jks
+.env
+.tools/
+__pycache__/
+*.log

@@ -1,0 +1,32 @@
+name: Test and build Android prototype
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  prototype:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      HYDRO_TOOLS: ${{ github.workspace }}/.tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Prepare verified Godot and Android tools
+        run: python3 scripts/setup.py --android
+      - name: Import project
+        run: ./scripts/godot.sh --headless --editor --import
+      - name: Physics, first-level completion, controls and lifecycle
+        run: ./scripts/godot.sh --headless --script res://tests/run.gd
+      - name: Build and verify debug APK
+        run: ./scripts/build_android.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hydrologic-android-debug
+          path: build/hydrologic-0.1.0-android.apk
