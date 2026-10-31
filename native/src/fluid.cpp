@@ -33,7 +33,7 @@ class NativeLiquidSolver : public RefCounted {
  std::vector<TerrainTile> tiles;
  Rect2 bounds,spawn,goal;
  int count=0,iterations=3,lost=0;
- float top=.82f,base=-.55f,radius=.052f,spacing=.1f,h=.22f,rho=6.8f,drag=.04f,max_speed=3.2f,viscosity=1.f;
+ float top=.82f,base=-.55f,radius=.052f,spacing=.1f,h=.22f,rho=6.8f,drag=.04f,max_speed=2.2f,viscosity=1.f,tension=.012f;
  float fraction=0,held=0,required=.8f,hold_seconds=.75f;
  bool completed=false;
  std::vector<Vector3> positions,velocities,previous,corrections,contacts,smoothed,boundary_gradient;
@@ -121,7 +121,7 @@ class NativeLiquidSolver : public RefCounted {
      density+=q*q*q;Vector3 grad=difference*(gradient_scale*q*q*inv);gradient_i+=grad;gradient_sum+=grad.length_squared();
     }
     boundary_gradient[i]=Vector3(wall.y,wall.z,wall.w)*(-density*inv/wall.x);gradient_i+=boundary_gradient[i];densities[i]=density/wall.x;
-    float compression=std::max(density*inv-1,0.f);lambdas[i]=-compression/(gradient_sum+gradient_i.length_squared()+.8f);
+    float compression=std::max(density*inv-1,-tension);lambdas[i]=-compression/(gradient_sum+gradient_i.length_squared()+.8f);
    }
    for(int i=0;i<count;++i)if(active[i]){
     Vector3 correction=boundary_gradient[i]*lambdas[i];
@@ -155,7 +155,7 @@ class NativeLiquidSolver : public RefCounted {
  std::vector<uint8_t> surface_flags;
  std::vector<int> surface_touched,surface_cells;
  Dictionary make_surface(){
-  constexpr float cell=.075f,iso=.65f,radius2=.18f*.18f;const Vector3 origin(-3.6f,-1.5f,-5.5f);
+  constexpr float cell=.075f,iso=.65f,radius2=.18f*.18f;const Vector3 origin(-3.6f,-1.5f,-5.5f);const float mass_weight=std::pow(spacing/.1f,3.f);
   if(surface_field.empty()){
    surface_field.assign(TOTAL,0);surface_gradient.assign(TOTAL,Vector3());surface_flags.assign(TOTAL,0);surface_floor.resize(SLICE);
    for(int z=0;z<SZ;++z)for(int x=0;x<SX;++x)surface_floor[z*SX+x]=floor_height(Vector2(origin.x+x*cell,origin.z+z*cell));
@@ -175,7 +175,7 @@ class NativeLiquidSolver : public RefCounted {
       int plane=z*SX+x;if(wy<surface_floor[plane]+.002f)continue;
       float dx=origin.x+x*cell-p.x,q=1-(dx*dx+yz2)/radius2;if(q<=0)continue;
       int index=y*SLICE+plane;if(surface_field[index]==0)surface_touched.push_back(index);
-      surface_field[index]+=q*q*q;surface_gradient[index]+=Vector3(dx,dy,dz)*(-6*q*q/radius2);
+      surface_field[index]+=q*q*q*mass_weight;surface_gradient[index]+=Vector3(dx,dy,dz)*(-6*q*q*mass_weight/radius2);
       for(int offset:offsets){int cindex=index+offset;if(!surface_flags[cindex]){surface_flags[cindex]=1;surface_cells.push_back(cindex);}}
      }
     }
@@ -219,7 +219,7 @@ public:
   Array ts=cfg["tiles"];for(int i=0;i<ts.size();++i){Dictionary t=ts[i];tiles.push_back(TerrainTile{Rect2(t["bounds"]),float(t["height"])});}
   bounds=cfg["bounds"];spawn=cfg["spawn"];goal=cfg["goal"];
   count=int(cfg["count"]);top=float(cfg["top"]);base=float(cfg["base"]);radius=float(cfg["radius"]);spacing=float(cfg["spacing"]);h=float(cfg["h"]);rho=float(cfg["rho"]);
-  drag=float(cfg["drag"]);max_speed=float(cfg["max_speed"]);viscosity=float(cfg["viscosity"]);iterations=int(cfg["iterations"]);required=float(cfg["required"]);hold_seconds=float(cfg["hold"]);
+  drag=float(cfg["drag"]);max_speed=float(cfg["max_speed"]);viscosity=float(cfg["viscosity"]);tension=float(cfg["tension"]);iterations=int(cfg["iterations"]);required=float(cfg["required"]);hold_seconds=float(cfg["hold"]);
   ERR_FAIL_COND(count<1 || count>4096 || floors.empty() || h<=0 || rho<=0);
   float integral=0;wall_table[0]=0;
   for(int i=1;i<=64;++i){float a=float(i-1)/64,b=float(i)/64;integral+=(std::pow(1-a*a,4.f)+std::pow(1-b*b,4.f))/128;wall_table[i]=integral;}

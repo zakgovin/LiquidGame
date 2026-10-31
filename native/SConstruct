@@ -1,4 +1,4 @@
 import os
 env = SConscript(os.path.join(os.environ['HYDRO_CPP_ROOT'], 'SConstruct'))
 env.Append(CPPPATH=['src'])
-Default(env.SharedLibrary('bin/libhydrologic' + env['suffix'] + env['SHLIBSUFFIX'], Glob('src/*.cpp')))
+Default(env.SharedLibrary('obj/libhydrologic' + env['suffix'] + env['SHLIBSUFFIX'], Glob('src/*.cpp')))

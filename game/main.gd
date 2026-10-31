@@ -1,6 +1,6 @@
 extends Node3D
 
-enum Screen { MENU, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, WON, FAILED }
+enum Screen { MENU, READY, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, WON, FAILED }
 const LEVEL: LevelDefinition = preload("res://resources/first_level.tres")
 const WATER: LiquidProfile = preload("res://resources/water.tres")
 const MAX_TILT: float = PI / 45.0 # Four degrees; purely visual, never a second gravity.
@@ -10,12 +10,18 @@ var controls := TiltInput.new()
 var pivot: Node3D
 var surface: FluidSurface
 var hud: HydrologicHUD
+var board: HydrologicBoard
+var sounds: SoundFeedback
 var screen: Screen = Screen.MENU
 var running: bool = false
 var tilt_feedback: bool = true
 var _render_tick: int = 0
 var _screenshot_frame: int = -1
 var _screenshot_path: String = ""
+var opening: bool = false
+var _opening_remaining: float = 0.0
+var _paused_from: Screen = Screen.PLAYING
+const OPEN_SECONDS: float = 0.42
 
 
 func _ready() -> void:
@@ -23,7 +29,7 @@ func _ready() -> void:
 	_setup_environment()
 	pivot = Node3D.new()
 	add_child(pivot)
-	var board := HydrologicBoard.new()
+	board = HydrologicBoard.new()
 	pivot.add_child(board)
 	board.build(LEVEL)
 	simulation = LiquidSimulation.new(LEVEL, WATER)
@@ -34,7 +40,11 @@ func _ready() -> void:
 	add_child(canvas)
 	hud = HydrologicHUD.new()
 	canvas.add_child(hud)
+	sounds = SoundFeedback.new()
+	add_child(sounds)
+	hud.interaction.connect(func(): sounds.play_event(&"click"))
 	hud.start_requested.connect(_start)
+	hud.release_requested.connect(_release)
 	hud.restart_requested.connect(_restart)
 	hud.pause_requested.connect(_pause)
 	hud.resume_requested.connect(_resume)
@@ -53,6 +63,9 @@ func _ready() -> void:
 	hud.feedback_changed.connect(func(value: bool):
 		tilt_feedback = value
 		_save_settings())
+	hud.sound_changed.connect(func(value: bool):
+		sounds.set_enabled(value)
+		_save_settings())
 	hud.field.vector_changed.connect(func(value: Vector2): controls.touch = value)
 	_load_settings()
 	controls.sensor_vector()
@@ -67,6 +80,14 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	var tilt := controls.sample(delta)
+	if screen == Screen.READY and opening:
+		_opening_remaining = maxf(0.0, _opening_remaining - delta)
+		board.set_reservoir_open_amount(1.0 - _opening_remaining / OPEN_SECONDS)
+		if _opening_remaining <= 0.0:
+			opening = false
+			running = true
+			screen = Screen.PLAYING
+			hud.show_game(controls.use_touch or not controls.has_sensor)
 	if running:
 		simulation.step(delta, tilt)
 		_render_tick += 1
@@ -76,10 +97,12 @@ func _physics_process(delta: float) -> void:
 		if simulation.completed:
 			running = false
 			screen = Screen.WON
+			sounds.play_event(&"complete")
 			hud.show_win(simulation.goal_fraction)
 		elif simulation.is_unwinnable():
 			running = false
 			screen = Screen.FAILED
+			sounds.play_event(&"failure")
 			hud.show_failure()
 	var target := Vector3.ZERO
 	if tilt_feedback and screen == Screen.PLAYING:
@@ -93,8 +116,17 @@ func _physics_process(delta: float) -> void:
 
 
 func _start() -> void:
-	controls.calibrate()
 	_restart()
+
+
+func _release() -> void:
+	if screen != Screen.READY or opening: return
+	controls.calibrate()
+	controls.touch = Vector2.ZERO
+	opening = true
+	_opening_remaining = OPEN_SECONDS
+	hud.show_ready(true)
+	sounds.play_event(&"start")
 
 
 func _restart() -> void:
@@ -104,13 +136,16 @@ func _restart() -> void:
 	controls.filtered = Vector2.ZERO
 	controls.touch = Vector2.ZERO
 	pivot.rotation = Vector3.ZERO
-	running = true
-	screen = Screen.PLAYING
-	hud.show_game(controls.use_touch or not controls.has_sensor)
+	board.set_reservoir_open_amount(0.0)
+	opening = false
+	running = false
+	screen = Screen.READY
+	hud.show_ready()
 
 
 func _pause() -> void:
-	if screen == Screen.PLAYING:
+	if screen == Screen.PLAYING or screen == Screen.READY:
+		_paused_from = screen
 		running = false
 		screen = Screen.PAUSED
 		hud.show_pause()
@@ -121,9 +156,10 @@ func _resume() -> void:
 		return
 	controls.filtered = Vector2.ZERO
 	controls.touch = Vector2.ZERO
-	running = true
-	screen = Screen.PLAYING
-	hud.show_game(controls.use_touch or not controls.has_sensor)
+	screen = _paused_from
+	running = screen == Screen.PLAYING
+	if running: hud.show_game(controls.use_touch or not controls.has_sensor)
+	else: hud.show_ready(opening)
 
 
 func _menu() -> void:
@@ -140,7 +176,7 @@ func _settings() -> void:
 	screen = Screen.SETTINGS
 	pivot.hide()
 	controls.sensor_vector()
-	hud.show_settings(controls.sensitivity, controls.use_touch, tilt_feedback, controls.has_sensor)
+	hud.show_settings(controls.sensitivity, controls.use_touch, tilt_feedback, controls.has_sensor, sounds.enabled)
 
 
 func _levels() -> void:
@@ -164,7 +200,7 @@ func _calibrate() -> void:
 
 func _back() -> void:
 	match screen:
-		Screen.PLAYING: _pause()
+		Screen.PLAYING, Screen.READY: _pause()
 		Screen.PAUSED: _resume()
 		Screen.SETTINGS, Screen.LEVELS, Screen.ABOUT, Screen.WON, Screen.FAILED: _menu()
 
@@ -173,7 +209,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
 			_back()
-		elif event.keycode == KEY_R and screen == Screen.PLAYING:
+		elif event.keycode == KEY_R and (screen == Screen.PLAYING or screen == Screen.READY):
 			_restart()
 		elif event.keycode == KEY_C and screen == Screen.SETTINGS:
 			_calibrate()
@@ -196,16 +232,20 @@ func _setup_environment() -> void:
 	environment.background_color = Color("eaf0ef")
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color("e2f0f5")
-	environment.ambient_light_energy = 0.18
+	environment.ambient_light_energy = 0.28
 	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	world.environment = environment
 	add_child(world)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-58, -32, 0)
+	sun.rotation_degrees = Vector3(-62, -28, 0)
 	sun.light_color = Color("fff5e6")
-	sun.light_energy = 0.35
+	sun.light_energy = 0.22
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 40
+	sun.shadow_opacity = 0.33
+	sun.shadow_bias = 0.1
+	sun.shadow_normal_bias = 1.2
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 24
 	add_child(sun)
 	var ground := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
@@ -217,8 +257,8 @@ func _setup_environment() -> void:
 	var camera := Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
-	camera.size = 6.95
-	camera.position = Vector3(0, 18, 8)
+	camera.size = 7.6
+	camera.position = Vector3(1.2, 15.4, 10.8)
 	camera.far = 100.0
 	add_child(camera)
 	camera.look_at(Vector3(0, 0.25, 0))
@@ -230,6 +270,7 @@ func _save_settings() -> void:
 	config.set_value("controls", "sensitivity", controls.sensitivity)
 	config.set_value("controls", "use_touch", controls.use_touch)
 	config.set_value("visual", "tilt_feedback", tilt_feedback)
+	config.set_value("audio", "enabled", sounds.enabled)
 	config.save("user://settings.cfg")
 
 
@@ -239,6 +280,7 @@ func _load_settings() -> void:
 		controls.sensitivity = clampf(float(config.get_value("controls", "sensitivity", 1.0)), 0.5, 1.8)
 		controls.use_touch = bool(config.get_value("controls", "use_touch", false))
 		tilt_feedback = bool(config.get_value("visual", "tilt_feedback", true))
+		sounds.set_enabled(bool(config.get_value("audio", "enabled", true)))
 
 
 func _capture() -> void:

@@ -1,7 +1,7 @@
 class_name LiquidSimulation
 extends RefCounted
-## Volumetric position-based fluid: Vector3 parcels, compression-only density
-## projection, 3D gravity, finite walls, real floors and falling/splashing water.
+## Volumetric position-based fluid: Vector3 parcels, density projection with
+## weak surface tension, 3D gravity, finite walls and falling/splashing water.
 
 var level: LevelDefinition
 var material: LiquidProfile
@@ -46,7 +46,7 @@ func reset() -> void:
 			"radius": material.particle_radius, "spacing": material.particle_spacing,
 			"h": material.interaction_radius, "rho": material.rest_density,
 			"drag": material.drag, "max_speed": material.max_speed,
-			"viscosity": material.viscosity, "iterations": material.solver_iterations,
+			"viscosity": material.viscosity, "tension": material.surface_tension, "iterations": material.solver_iterations,
 			"required": level.required_fraction, "hold": level.hold_seconds})
 		_sync_native()
 		return
@@ -188,7 +188,9 @@ func _substep(dt: float, gravity: Vector3) -> void:
 			_boundary_gradient[i] = Vector3(wall.y, wall.z, wall.w) * (-density * inverse / wall.x)
 			gradient_i += _boundary_gradient[i]
 			_densities[i] = density / wall.x
-			var compression := maxf(density * inverse - 1.0, 0.0)
+			# A small tensile limit keeps a free surface connected without
+			# adding bulk viscosity or restoring a rigid source shape.
+			var compression := maxf(density * inverse - 1.0, -material.surface_tension)
 			_lambdas[i] = -compression / (gradient_sum + gradient_i.length_squared() + 0.8)
 		for i: int in range(count):
 			if active[i] == 0: continue

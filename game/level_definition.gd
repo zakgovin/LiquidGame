@@ -9,7 +9,7 @@ extends Resource
 @export var outline: PackedVector2Array
 @export var spawn: Rect2
 @export var goal: Rect2
-@export var particle_count: int = 256
+@export var particle_count: int = 512
 @export var required_fraction: float = 0.8
 @export var hold_seconds: float = 0.75
 @export var board_bounds: Rect2 = Rect2(-2.95, -4.9, 5.9, 9.8)

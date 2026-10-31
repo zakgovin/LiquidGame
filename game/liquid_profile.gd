@@ -8,9 +8,10 @@ extends Resource
 @export var color: Color = Color("16b3df")
 @export var rest_density: float = 6.8
 @export var viscosity: float = 1.0
-@export var interaction_radius: float = 0.22
-@export var particle_spacing: float = 0.10
-@export var particle_radius: float = 0.052
+@export var surface_tension: float = 0.012
+@export var interaction_radius: float = 0.174614
+@export var particle_spacing: float = 0.07937
+@export var particle_radius: float = 0.0412724
 @export var drag: float = 0.04
 @export var max_speed: float = 2.2
 @export_range(2, 6) var solver_iterations: int = 3

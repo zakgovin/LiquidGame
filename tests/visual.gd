@@ -1,5 +1,5 @@
 extends SceneTree
-## Real-render and native input smoke tests; requires a display.
+## Real-render, mobile touch, menu animation, reservoir and audio smoke tests.
 var failures: int = 0
 var checks: int = 0
 
@@ -31,92 +31,139 @@ func tap(button: Button) -> void:
 	await process_frame
 
 
-func _run() -> void:
-	root.size = Vector2i(720, 1280)
-	var game: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
-	root.add_child(game)
-	await process_frame
-	check(not game.pivot.visible, "Level is absent from the menu background")
-	await capture("v03-menu")
-	await tap(game.hud.buttons["levels"])
-	check(game.screen == game.Screen.LEVELS, "Level navigation opens from the menu")
-	await capture("v03-levels")
-	await tap(game.hud.buttons["level_0"])
-	check(game.screen == game.Screen.MENU, "Available level selection returns to the play menu")
-	await tap(game.hud.buttons["settings"])
-	check(game.screen == game.Screen.SETTINGS, "Settings opens through its button")
-	game.hud.mode_picker.select(1)
-	game.hud.mode_picker.item_selected.emit(1)
-	game.hud.slider.value = 1.0
-	game.tilt_feedback = true
-	game.hud.feedback_toggle.button_pressed = true
-	await capture("v03-settings")
-	await tap(game.hud.buttons["back"])
-	await tap(game.hud.buttons["about"])
-	check(game.screen == game.Screen.ABOUT, "Description opens through its button")
-	await capture("v03-about")
-	await tap(game.hud.buttons["back"])
-	await tap(game.hud.buttons["play"])
-	check(game.running and game.hud.page == null and game.hud.buttons.size() == 1, "Play opens clean gameplay with only pause")
-	await capture("v03-game")
+func swipe(from: Vector2, to: Vector2) -> void:
 	var touch := InputEventScreenTouch.new()
 	touch.index = 0
-	touch.position = Vector2(300, 700)
+	touch.position = from
 	touch.pressed = true
 	Input.parse_input_event(touch)
 	await process_frame
-	var drag := InputEventScreenDrag.new()
-	drag.index = 0
-	drag.position = Vector2(420, 820)
-	Input.parse_input_event(drag)
-	await process_frame
-	check(game.controls.touch.x > 0.5 and game.controls.touch.y > 0.5, "Dragging the bare field controls tilt without a joystick")
+	for step: int in range(1, 9):
+		var drag := InputEventScreenDrag.new()
+		drag.index = 0
+		drag.position = from.lerp(to, float(step) / 8.0)
+		drag.relative = (to - from) / 8.0
+		Input.parse_input_event(drag)
+		await process_frame
 	touch = InputEventScreenTouch.new()
 	touch.index = 0
-	touch.position = Vector2(710, 1260)
+	touch.position = to
 	touch.pressed = false
 	Input.parse_input_event(touch)
 	await process_frame
-	check(game.controls.touch == Vector2.ZERO, "Releasing away from the initial touch clears input")
-	await tap(game.hud.buttons["pause"])
-	check(game.screen == game.Screen.PAUSED, "Pause remains clickable with field gestures enabled")
-	await capture("v03-pause")
-	await tap(game.hud.buttons["resume"])
-	check(game.running, "Continue resumes gameplay")
-	await tap(game.hud.buttons["pause"])
-	await tap(game.hud.buttons["restart"])
-	check(game.running and game.simulation.goal_fraction == 0.0, "Restart is accessible from pause")
-	await tap(game.hud.buttons["pause"])
-	await tap(game.hud.buttons["exit"])
-	check(game.screen == game.Screen.MENU and root.is_inside_tree(), "Exit returns to the menu instead of quitting the application")
+
+
+func release_water(game: Node) -> void:
+	await tap(game.hud.buttons["release"])
+	for i: int in range(28): game._physics_process(1.0 / 60.0)
+	await process_frame
+
+
+func _run() -> void:
+	Input.emulate_touch_from_mouse = true
+	root.size = Vector2i(720, 1280)
+	var game: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	root.add_child(game)
+	game.set_physics_process(false)
+	game.sounds.set_enabled(true)
+	var events: Array[StringName] = []
+	game.sounds.played.connect(func(event: StringName): events.append(event))
+	await process_frame
+	check(not game.pivot.visible, "Menu contains no gameplay background")
+	await capture("v04-menu")
+	var phase: float = game.hud.brand.phase
+	await process_frame
+	await process_frame
+	check(game.hud.brand.phase != phase, "Water animates inside the integrated title lockup")
+	await capture("v04-menu-animated")
+	await tap(game.hud.buttons["levels"])
+	check(game.screen == game.Screen.LEVELS, "Level navigation opens through touch")
+	check(game.hud.buttons["back"].get_global_rect().position.y > 1100, "Main-menu navigation is within the bottom thumb area")
+	await capture("v04-levels")
+	await tap(game.hud.buttons["level_0"])
+	await tap(game.hud.buttons["settings"])
+	check(game.screen == game.Screen.SETTINGS, "Settings opens through touch")
+	await tap(game.hud.buttons["mode_tilt"])
+	check(not game.controls.use_touch, "Segmented control selects phone tilt")
+	await tap(game.hud.buttons["mode_touch"])
+	check(game.controls.use_touch, "Segmented control selects field gestures")
+	var slider: HSlider = game.hud.slider
+	var initial: float = slider.value
+	var rect := slider.get_global_rect()
+	await swipe(rect.get_center(), rect.get_center() + Vector2(140, 0))
+	check(not is_equal_approx(slider.value, initial), "Large slider responds to an actual touch drag")
+	slider.value = 1.0
+	game.hud.feedback_toggle.button_pressed = true
+	game.hud.sound_toggle.button_pressed = true
+	await capture("v04-settings")
+	await swipe(Vector2(400, 980), Vector2(400, 440))
+	check(game.hud.settings_scroll.scroll_vertical > 0, "Settings content scrolls with a vertical phone gesture")
+	check(game.hud.buttons["back"].get_global_rect().position.y > 1100, "Bottom navigation stays fixed while settings scroll")
+	await capture("v04-settings-bottom")
+	await tap(game.hud.buttons["back"])
+	await tap(game.hud.buttons["about"])
+	check(game.screen == game.Screen.ABOUT, "About screen opens")
+	await capture("v04-about")
+	game.hud.settings_scroll.scroll_vertical = 2000
+	await process_frame
+	await capture("v04-credits")
+	await tap(game.hud.buttons["back"])
 	root.size = Vector2i(720, 1600)
 	await process_frame
+	await tap(game.hud.buttons["settings"])
 	await process_frame
-	check(game.hud.buttons["play"].get_global_rect().end.y < 1600, "Menu adapts to a tall phone without letterboxing or offscreen buttons")
-	await capture("v03-menu-tall")
+	check(game.hud.buttons["back"].get_global_rect().position.y > 1400, "Bottom navigation follows the physical bottom on a tall screen")
+	await capture("v04-settings-tall")
+	await tap(game.hud.buttons["back"])
+	await capture("v04-menu-tall")
 	root.size = Vector2i(720, 1280)
 	await process_frame
 	await tap(game.hud.buttons["play"])
-	game.set_physics_process(false)
-	game.controls.touch = Vector2(0.75, 0.4)
-	for i: int in range(30): game._physics_process(1.0 / 60.0)
-	check(game.pivot.rotation.z < -0.02 and game.pivot.rotation.x > 0.01, "Board visibly follows both axes of inclination")
-	await capture("v03-tilt")
-	game._restart()
-	var phase := 0
-	for direction: Vector2 in [Vector2.DOWN, Vector2(1, 0.5), Vector2(0.5, -1), Vector2(-1, -0.5), Vector2(-0.4, 1), Vector2.DOWN]:
+	check(game.screen == game.Screen.READY and not game.running, "Play opens the closed reservoir before physics starts")
+	var held: PackedVector3Array = game.simulation.positions.duplicate()
+	game.controls.touch = Vector2.DOWN
+	for i: int in range(90): game._physics_process(1.0 / 60.0)
+	check(held == game.simulation.positions and game.board.reservoir.visible, "Water stays enclosed until the player releases it")
+	await capture("v04-reservoir")
+	await tap(game.hud.buttons["pause"])
+	await tap(game.hud.buttons["resume"])
+	check(game.screen == game.Screen.READY and not game.running, "Continue during preparation keeps the reservoir closed")
+	await release_water(game)
+	check(game.running and game.hud.page == null and game.hud.buttons.size() == 1 and not game.board.reservoir.visible, "Release opens the gate and leaves only pause in gameplay")
+	check(events.has(&"click") and events.has(&"start"), "Touch interactions and releasing water trigger their audio cues")
+	await capture("v04-game")
+	await swipe(Vector2(300, 600), Vector2(430, 730))
+	check(game.controls.touch == Vector2.ZERO, "Releasing the field gesture clears control input")
+	game.controls.touch = Vector2(0.12, 0.75)
+	for frame: int in range(120): game._physics_process(1.0 / 60.0)
+	await capture("v04-flow-close")
+	check(game.pivot.rotation.z < 0 and game.pivot.rotation.x > 0, "The complete 3D scene follows the inclination")
+	await tap(game.hud.buttons["pause"])
+	check(game.screen == game.Screen.PAUSED, "Pause stays accessible over the field")
+	await capture("v04-pause")
+	await tap(game.hud.buttons["restart"])
+	check(game.screen == game.Screen.READY and game.board.reservoir.visible, "Restart refills and closes the reservoir")
+	await release_water(game)
+	var circuit: Array[Vector2] = [Vector2.DOWN, Vector2(1, 0.5), Vector2(0.5, -1), Vector2(-1, -0.5), Vector2(-0.4, 1), Vector2.DOWN]
+	var stage := 0
+	for direction: Vector2 in circuit:
 		game.controls.touch = direction.normalized()
 		for frame: int in range(600):
 			game._physics_process(1.0 / 60.0)
 			if frame % 120 == 0: await process_frame
-		phase += 1
-		await capture("v03-flow-%d" % phase)
+		stage += 1
+		await capture("v04-circuit-%d" % stage)
 	print("Controller delivered fraction: ", game.simulation.goal_fraction)
-	check(game.simulation.completed and game.screen == game.Screen.WON, "Complete 360-degree route reaches the victory screen through the controller")
-	await capture("v03-victory")
+	check(game.simulation.completed and game.screen == game.Screen.WON, "The full 360-degree circuit completes through the real game controller")
+	check(events.count(&"complete") == 1, "Completion plays its cue exactly once")
+	await capture("v04-victory")
 	if game.hud.buttons.has("win_menu"):
 		await tap(game.hud.buttons["win_menu"])
 		check(game.screen == game.Screen.MENU, "Victory returns to the main menu")
+	game.sounds.set_enabled(false)
 	game.free()
+	await process_frame
+	await process_frame
+	await create_timer(0.08).timeout
 	print("VISUAL RESULT: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)

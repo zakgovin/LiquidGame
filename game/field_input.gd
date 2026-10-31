@@ -22,7 +22,7 @@ func reset() -> void:
 
 func _allowed(point: Vector2) -> bool:
 	# Keep the pause button available, including before its GUI event is routed.
-	return not Rect2(size.x - 132.0, 0, 132, 160).has_point(point)
+	return not Rect2(size.x - 160.0, 0, 160, 176).has_point(point)
 
 
 func _input(event: InputEvent) -> void:

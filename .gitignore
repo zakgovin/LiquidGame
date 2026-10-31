@@ -11,3 +11,5 @@ native/bin/*.so
 native/.sconsign*
 native/src/*.os
 native/src/*.o
+native/obj/
+native/bin/*.tmp-*

@@ -47,6 +47,11 @@ func sensor_angle(degrees: float) -> void:
 	Input.set_gravity(Vector3(sin(angle), 0, cos(angle)) * 9.81)
 
 
+func release_water(game: Node) -> void:
+	game._release()
+	for frame: int in range(27): game._physics_process(1.0 / 60.0)
+
+
 func _run() -> void:
 	var begin := Time.get_ticks_msec()
 	var fluid := LiquidSimulation.new(LEVEL, WATER)
@@ -57,7 +62,7 @@ func _run() -> void:
 	for point: Vector3 in fluid.positions:
 		low = minf(low, point.y)
 		high = maxf(high, point.y)
-	check(high - low > 0.09, "Source contains multiple vertical particle layers")
+	check(high - low > WATER.particle_spacing * 0.9, "Source contains multiple vertical particle layers")
 	check(LEVEL.elevation(0) - LEVEL.elevation(4) > 0.5 and LEVEL.board_top > LEVEL.elevation(0) + 0.3, "Level contains descending floors and finite-height walls")
 	check(advance(fluid, 300, Vector2.ZERO) and fluid.lost_count == 0, "Resting water keeps its complete volume for five seconds")
 	var before := center(fluid.positions)
@@ -83,15 +88,21 @@ func _run() -> void:
 	check(advance(fluid, 120, Vector2(1000, -1000)), "Extreme input is clamped and leaves a finite simulation")
 	var reference := LiquidSimulation.new(LEVEL, WATER, false)
 	fluid.reset()
-	advance(reference, 20, Vector2(0.2, 0.4))
-	advance(fluid, 20, Vector2(0.2, 0.4))
+	advance(reference, 12, Vector2(0.2, 0.4))
+	advance(fluid, 12, Vector2(0.2, 0.4))
 	var difference := 0.0
 	for i: int in range(fluid.positions.size()): difference = maxf(difference, fluid.positions[i].distance_to(reference.positions[i]))
 	check(difference < 0.002, "Native solver matches the independent GDScript reference over the initial flow")
+	advance(reference, 8, Vector2(0.2, 0.4))
+	advance(fluid, 8, Vector2(0.2, 0.4))
+	var mean_difference := 0.0
+	for i: int in range(fluid.positions.size()): mean_difference += fluid.positions[i].distance_to(reference.positions[i])
+	mean_difference /= fluid.positions.size()
+	check(mean_difference < WATER.particle_spacing * 0.04 and center(fluid.positions).distance_to(center(reference.positions)) < 0.002, "Longer native/reference flow agrees on the bulk motion within a small fraction of parcel spacing")
 	var one := LEVEL.duplicate() as LevelDefinition
 	one.particle_count = 1
 	var drop := LiquidSimulation.new(one, WATER)
-	drop.set_particle(0, Vector3(-1.9, 0.472, 2.95), Vector3(0, 0, 2))
+	drop.set_particle(0, Vector3(-1.9, LEVEL.elevation(0) + WATER.particle_radius, 2.95), Vector3(0, 0, 2))
 	var flew := false
 	var accelerated_at_join := false
 	for frame: int in range(30):
@@ -99,14 +110,14 @@ func _run() -> void:
 		var point := drop.positions[0]
 		if point.z > 3.1 and point.y > 0.35 and drop.velocities[0].y < -0.05: flew = true
 		if drop.velocities[0].z > 2.02: accelerated_at_join = true
-	check(flew and absf(drop.positions[0].y - 0.332) < 0.003, "Water falls through real vertical space and lands on a lower floor")
+	check(flew and absf(drop.positions[0].y - (LEVEL.elevation(1) + WATER.particle_radius)) < 0.003, "Water falls through real vertical space and lands on a lower floor")
 	check(not accelerated_at_join, "Crossing connected floor sections adds no artificial forward impulse")
-	drop.set_particle(0, Vector3(-1.9, 0.332, 3.3), Vector3(0, 0, -2))
+	drop.set_particle(0, Vector3(-1.9, LEVEL.elevation(1) + WATER.particle_radius, 3.3), Vector3(0, 0, -2))
 	advance(drop, 30, Vector2.UP)
 	check(drop.positions[0].z > 3.14 and drop.positions[0].y < 0.35, "A riser blocks water from teleporting onto a higher floor")
-	drop.set_particle(0, Vector3(2.5, 0.192, 0), Vector3(3, 0, 1))
+	drop.set_particle(0, Vector3(2.5, LEVEL.elevation(2) + WATER.particle_radius, 0), Vector3(3, 0, 1))
 	advance(drop, 15, Vector2.ZERO)
-	check(drop.positions[0].x <= 2.55 and drop.positions[0].z > 0.15, "Side-wall contact preserves tangential flow")
+	check(drop.positions[0].x <= 2.601 - WATER.particle_radius and drop.positions[0].z > 0.14, "Side-wall contact preserves tangential flow")
 	drop.set_particle(0, Vector3(-1.3, 1.3, 0), Vector3(2, 0, 0))
 	advance(drop, 10, Vector2.ZERO)
 	check(drop.positions[0].x > -1.05 and drop.positions[0].y > 1.0, "Airborne water can cross above a finite wall")
@@ -152,8 +163,15 @@ func _run() -> void:
 	check(not game.pivot.visible and is_equal_approx((game.hud.page.get_child(0) as ColorRect).color.a, 1.0), "Main menu hides all level geometry behind an opaque background")
 	check(game.hud.buttons.has_all(["play", "levels", "settings", "about"]), "Main menu exposes play, level navigation, settings and description")
 	game._settings()
+	check(game.hud.slider.custom_minimum_size.y >= 96 and game.hud.feedback_toggle.custom_minimum_size.y >= 96, "Settings controls meet the 48 dp minimum touch target")
+	check(game.hud.buttons["back"].position.y == 32 and game.hud.buttons["back"].get_parent().offset_top == -168, "Main-menu navigation is anchored in the bottom bar")
+	game.hud.sound_toggle.button_pressed = false
+	check(not game.sounds.enabled, "Sound switch mutes feedback")
+	game.hud.sound_toggle.button_pressed = true
+	check(game.sounds.enabled, "Sound switch restores feedback")
 	game.hud.slider.value = 1.4
-	game.hud.mode_picker.item_selected.emit(1)
+	game.hud.buttons["mode_touch"].button_pressed = true
+	game.hud.buttons["mode_touch"].pressed.emit()
 	game.hud.feedback_toggle.button_pressed = false
 	check(is_equal_approx(game.controls.sensitivity, 1.4) and game.controls.use_touch and not game.tilt_feedback, "Settings update controls and visual feedback")
 	game.controls.sensitivity = 1.0
@@ -171,9 +189,29 @@ func _run() -> void:
 	check(not game.running and game.screen == game.Screen.ABOUT, "Description opens without running physics")
 	var credits := ""
 	for label: Node in game.hud.page.find_children("*", "Label", true, false): credits += label.text
-	check("Zak Govin" in credits and "Codex (OpenAI)" in credits, "Description credits both game authors")
+	check("Zakhar Govin" in credits and "Codex (OpenAI)" in credits, "Description credits both game authors")
 	game._menu()
 	game._start()
+	var waiting: PackedVector3Array = game.simulation.positions.duplicate()
+	game.controls.touch = Vector2(1, 1)
+	for frame: int in range(120): game._physics_process(1.0 / 60.0)
+	check(game.screen == game.Screen.READY and not game.running and waiting == game.simulation.positions, "Closed reservoir holds all water regardless of phone input before release")
+	check(game.board.reservoir.visible and not game.hud.field.active, "Reservoir is visibly closed and gameplay gestures wait for release")
+	game._pause()
+	game._resume()
+	check(game.screen == game.Screen.READY and not game.running, "Pausing preparation returns to the closed reservoir")
+	sensor_angle(18.0)
+	game._release()
+	check(game.controls.neutral.distance_to(game.controls.sensor_vector()) < 0.00001, "Opening calibrates the phone position at the actual moment of release")
+	Input.set_gravity(Vector3.ZERO)
+	game._physics_process(0.1)
+	var gate_position: Vector3 = game.board.reservoir.get_child(0).position
+	game._pause()
+	game._physics_process(0.5)
+	check(game.board.reservoir.get_child(0).position == gate_position and game.simulation.positions == waiting, "Pause freezes the opening gate and waiting water")
+	game._resume()
+	for frame: int in range(27): game._physics_process(1.0 / 60.0)
+	check(not game.board.reservoir.visible and game.running, "Water starts after the gate is fully open")
 	check(game.running and game.hud.page == null and game.hud.buttons.size() == 1, "Gameplay contains only the scene, invisible input and pause button")
 	check(game.pivot.visible, "Play restores the visible 3D level")
 	game.controls.touch = Vector2.RIGHT
@@ -192,23 +230,48 @@ func _run() -> void:
 	game._back()
 	check(not game.running and game.simulation.positions == old, "Back from menu never resumes a hidden game")
 	game._start()
+	release_water(game)
 	game._pause()
 	game._resume()
 	check(game.running and game.controls.touch == Vector2.ZERO, "Resume clears stale touch input")
 	game._notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_OUT)
 	check(game.screen == game.Screen.PAUSED, "Backgrounding gameplay opens pause")
 	game._restart()
+	check(game.screen == game.Screen.READY and not game.running, "Restart closes the reservoir and waits for the player")
+	release_water(game)
 	check(game.running and game.simulation.goal_fraction == 0.0, "Restart returns water to the source")
 	game._pause()
 	game._menu()
 	game._notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_OUT)
 	check(game.screen == game.Screen.MENU, "Backgrounding the main menu does not create a pause dialog")
 	game._start()
-	for i: int in range(52): game.simulation.set_particle(i, Vector3(4.5, -2, 0), Vector3.ZERO)
+	release_water(game)
+	for i: int in range(floori(LEVEL.particle_count * (1.0 - LEVEL.required_fraction)) + 1): game.simulation.set_particle(i, Vector3(4.5, -2, 0), Vector3.ZERO)
 	game._physics_process(1.0 / 60.0)
 	check(game.screen == game.Screen.FAILED and not game.running and game.hud.buttons.has_all(["retry", "fail_menu"]), "Losing too much water opens a recoverable failure dialog")
 	game.hud.buttons["retry"].pressed.emit()
-	check(game.running and game.simulation.lost_count == 0, "Retry restores the spilled water")
+	check(game.screen == game.Screen.READY and not game.running and game.simulation.lost_count == 0, "Retry restores water inside the closed reservoir")
+	var heard: Array[StringName] = []
+	game.sounds.played.connect(func(event: StringName): heard.append(event))
+	game.sounds.play_event(&"click")
+	game._release()
+	check(heard.has(&"click") and heard.has(&"start"), "Button and release actions trigger distinct sound feedback")
+	game.sounds.set_enabled(false)
+	var event_count := heard.size()
+	game.sounds.play_event(&"complete")
+	check(heard.size() == event_count, "Muted feedback stays silent")
+	game.sounds.set_enabled(true)
+	game._save_settings()
+	# Flush audio requests produced by synchronous lifecycle checks before
+	# stopping the mixer voices and destroying their players.
+	await process_frame
+	await create_timer(0.12).timeout
+	game.sounds.set_enabled(false)
+	await process_frame
+	await create_timer(0.12).timeout
 	game.free()
+	await process_frame
+	await process_frame
+	await create_timer(0.08).timeout # Let the audio mixer release stopped voices.
 	print("RESULT: %d checks, %d failures; %.2f seconds" % [checks, failures, (Time.get_ticks_msec() - begin) / 1000.0])
 	quit(1 if failures else 0)

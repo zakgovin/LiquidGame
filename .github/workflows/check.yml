@@ -29,4 +29,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: hydrologic-android-debug
-          path: build/hydrologic-0.3.0-android.apk
+          path: build/hydrologic-0.4.0-android.apk

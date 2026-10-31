@@ -43,6 +43,9 @@ def build(android=False):
         shutil.move(str(staging / "android-ndk-r28b"), ndk)
         staging.rmdir()
     env["ANDROID_HOME"] = str(sdk)
+    staging = PROJECT / "native/obj"
+    staging.mkdir(exist_ok=True)
+    (staging / ".gdignore").touch()
     targets = [("linux", "x86_64")]
     if android:
         targets.extend([("android", "arm64"), ("android", "x86_64")])
@@ -53,9 +56,14 @@ def build(android=False):
             f"platform={platform}", f"arch={arch}", "target=template_release",
             "android_api_level=24", f"build_profile={PROJECT / 'native/build_profile.json'}",
             "debug_symbols=no"], cwd=PROJECT / "native", env=env, check=True)
-        library = PROJECT / f"native/bin/libhydrologic.{platform}.template_release.{arch}.so"
+        library = staging / f"libhydrologic.{platform}.template_release.{arch}.so"
         strip = str(ndk / "toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip") if platform == "android" else "strip"
         subprocess.run([strip, "--strip-unneeded", str(library)], check=True)
+        # Preserve the original mapping in a running editor or game process.
+        destination = PROJECT / "native/bin" / library.name
+        temporary = destination.with_name(destination.name + f".tmp-{os.getpid()}")
+        shutil.copy2(library, temporary)
+        temporary.replace(destination)
 
 
 if __name__ == "__main__":

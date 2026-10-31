@@ -33,9 +33,11 @@ var _edge_normals := PackedVector3Array()
 var _vertices := PackedVector3Array()
 var _normals := PackedVector3Array()
 var _mesh := ArrayMesh.new()
+var _mass_weight: float = 1.0
 
 
 func _init(profile: LiquidProfile = null) -> void:
+	if profile != null: _mass_weight = pow(profile.particle_spacing / 0.1, 3.0)
 	_values.resize(8)
 	_points.resize(8)
 	_point_normals.resize(8)
@@ -98,8 +100,8 @@ func rebuild(particles: PackedVector3Array, level: LevelDefinition, active: Pack
 					if q <= 0.0: continue
 					var index := iy * SLICE + plane_index
 					if _field[index] == 0.0: _touched.append(index)
-					_field[index] += q * q * q
-					_gradients[index] += Vector3(dx, dy, dz) * (-6.0 * q * q / radius2)
+					_field[index] += q * q * q * _mass_weight
+					_gradients[index] += Vector3(dx, dy, dz) * (-6.0 * q * q * _mass_weight / radius2)
 					for offset: int in CELL_OFFSETS:
 						var cell := index + offset
 						if _flags[cell] == 0:
