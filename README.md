@@ -68,6 +68,8 @@ adb shell am start -n com.zakgovin.hydrologic/com.godot.game.GodotAppLauncher
 
 Проверка на реальном телефоне нужна для оценки чувствительности датчика, производительности GPU/CPU, нагрева и автономности. Программная проверка осей не заменяет такую проверку.
 
+Подробные результаты и ограничения Android-эмулятора: [docs/VALIDATION.md](docs/VALIDATION.md).
+
 ## Лицензии сторонних компонентов
 
 Геометрия, иконка и интерфейс созданы для проекта. Визуальное направление вдохновлено Mirror’s Edge, без использования её материалов. Движок Godot — MIT (`assets/GODOT-LICENSE.txt`, `assets/GODOT-COPYRIGHT.txt`); Noto Sans — SIL OFL 1.1 (`assets/fonts/OFL.txt`). Уведомления включены в экспорт.
