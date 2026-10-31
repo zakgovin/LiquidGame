@@ -6,7 +6,9 @@ Android-игра о перемещении жидкости наклоном т�
 
 ## Попробовать на Android
 
-Тестовая сборка — `build/hydrologic-0.1.0-android.apk` (предоставляется с результатом разработки; в Git бинарник не хранится). Workflow в [Actions](https://github.com/zakgovin/LiquidGame/actions) также собирает APK и сохраняет артефакт `hydrologic-android-debug`, если запуск разрешён настройками репозитория. Это сборка с debug-подписью, не публикация в Google Play. Минимум Android 7.0 (API 24), OpenGL ES 3.0; архитектуры ARM64 и x86_64. 32-битные устройства пока не поддерживаются. Приложение работает офлайн и не запрашивает разрешений.
+[Скачать Hydrologic 0.1.0 — Android APK](https://github.com/zakgovin/LiquidGame/raw/refs/heads/downloads/hydrologic-0.1.0-android.apk) — прямая ссылка на файл, без ZIP и входа в GitHub. APK и его SHA-256 хранятся в отдельной ветке [downloads](https://github.com/zakgovin/LiquidGame/tree/downloads).
+
+Это тестовая сборка с debug-подписью, не публикация в Google Play. Минимум Android 7.0 (API 24), OpenGL ES 3.0; архитектуры ARM64 и x86_64. 32-битные устройства пока не поддерживаются. Приложение работает офлайн и не запрашивает разрешений. Workflow в [Actions](https://github.com/zakgovin/LiquidGame/actions) также собирает APK и сохраняет артефакт `hydrologic-android-debug`, если запуск разрешён настройками репозитория.
 
 1. Установите APK, разрешив установку из выбранного источника в настройках Android.
 2. Держите телефон в удобном положении и нажмите **«Начать»** — положение станет нейтральным.
