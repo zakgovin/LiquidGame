@@ -125,7 +125,7 @@ func check_dynamic_shadows(game: Node) -> void:
 	caster.show()
 	var after := await settled_image()
 	check(not original and changed_pixels(before, after) == 0, "An invisible moving caster creates no shadow on or underneath the level")
-	after.save_png("res://build/v0111-shadow-free.png")
+	after.save_png("res://build/v0112-shadow-free.png")
 	# A positive control ensures that this fixture would expose a shadow
 	# regression rather than passing because the caster misses the board.
 	light.shadow_enabled = true
@@ -134,7 +134,7 @@ func check_dynamic_shadows(game: Node) -> void:
 	caster.show()
 	after = await settled_image()
 	check(changed_pixels(before, after) > 100, "The shadow-control fixture detects a projected shadow when explicitly enabled")
-	after.save_png("res://build/v0111-shadow-control.png")
+	after.save_png("res://build/v0112-shadow-control.png")
 	caster.free()
 	light.shadow_enabled = original
 	await settled_image()
@@ -186,7 +186,7 @@ func _run() -> void:
 	game.sounds.played.connect(func(event: StringName): events.append(event))
 	await process_frame
 	check(not game.pivot.visible, "Menu contains no gameplay background")
-	await capture("v0111-menu")
+	await capture("v0112-menu")
 	var phase: float = game.hud.brand.phase
 	await process_frame
 	await process_frame
@@ -199,7 +199,7 @@ func _run() -> void:
 	check(game.screen == game.Screen.SETTINGS, "Settings opens through touch")
 	await tap(game.hud.buttons["mode_tilt"])
 	check(not game.controls.use_rotation and not game.hud.feedback_toggle.disabled, "Tilt mode enables phone feedback")
-	await capture("v0111-settings-tilt")
+	await capture("v0112-settings-tilt")
 	await tap(game.hud.buttons["mode_rotate"])
 	check(game.controls.use_rotation and game.hud.feedback_toggle.disabled, "Rotate replaces touch steering and identifies phone-only feedback")
 	var slider: HSlider = game.hud.slider
@@ -209,28 +209,28 @@ func _run() -> void:
 	check(not is_equal_approx(slider.value, initial), "Sensitivity responds to a touch drag")
 	slider.value = 1.0
 	game.hud.sound_toggle.button_pressed = true
-	await capture("v0111-settings")
+	await capture("v0112-settings")
 	var sensitivity_card: Node = game.hud.slider.find_parent("SensitivityGroup")
 	check(sensitivity_card != null and not sensitivity_card.is_ancestor_of(game.hud.buttons["mode_tilt"]), "Sensitivity stays grouped apart from mode selection")
 	for label: Label in sensitivity_card.find_children("*", "Label", true, false):
 		if label.text == tr("SENSITIVITY"): check(label.get_line_count() == 1, "Russian sensitivity title fits on one line")
 	await tap(game.hud.buttons["language_en"])
 	check(game.language_code == "en" and "Rotate" in game.hud.buttons["mode_rotate"].text, "English includes the new rotation control")
-	await capture("v0111-settings-en")
+	await capture("v0112-settings-en")
 	await tap(game.hud.buttons["language_ru"])
 	await swipe(Vector2(400, 980), Vector2(400, 440))
 	check(game.hud.settings_scroll.scroll_vertical > 0, "Settings scrolls with a finger while its scrollbar stays hidden")
 	check(game.hud.buttons["back"].get_global_rect().position.y > 1100, "Bottom navigation stays fixed during scrolling")
-	await capture("v0111-settings-bottom")
+	await capture("v0112-settings-bottom")
 	await tap(game.hud.buttons["back"])
 	await tap(game.hud.buttons["about"])
 	check(game.screen == game.Screen.ABOUT, "About screen opens")
-	await capture("v0111-about")
+	await capture("v0112-about")
 	await tap(game.hud.buttons["back"])
 	await tap(game.hud.buttons["play"])
 	check(game.screen == game.Screen.READY and not game.running, "Play starts with enclosed water")
 	var held: PackedVector3Array = game.simulation.positions.duplicate()
-	await capture("v0111-reservoir")
+	await capture("v0112-reservoir")
 	await check_dynamic_shadows(game)
 	await send_touch(Vector2(48, 1100), true)
 	await send_touch(Vector2(48, 1100), false)
@@ -241,7 +241,7 @@ func _run() -> void:
 	check(absf(game.rotation_angle - PI / 2.0) < 0.01, "Clockwise circular drag rotates the board clockwise")
 	check(game.camera.basis.is_equal_approx(fixed_basis) and is_equal_approx(game.camera.size, fixed_size), "Clockwise turn preserves camera orientation and scale")
 	check(not game.hud.field.is_dragging(), "Lifting a finger ends the gesture without resetting the orientation")
-	await capture("v0111-clockwise")
+	await capture("v0112-clockwise")
 	await arc(game, 2.8, 0.0, -PI / 4.0)
 	check(absf(game.rotation_angle - PI / 4.0) < 0.01, "Counterclockwise drag rotates the board back")
 	check(held == game.simulation.positions and board_fits(game), "Preparation rotates the complete glass volume without releasing water")
@@ -262,12 +262,12 @@ func _run() -> void:
 	await arc(game, 2.8, -PI / 2.0, PI / 4.0)
 	check(absf(wrapf(game.rotation_angle - preserved - PI / 4.0, -PI, PI)) < 0.01, "Rotation tracks touch correctly at a scaled physical resolution")
 	check(board_fits(game), "Fixed raised camera preserves every wall at the scaled resolution")
-	await capture("v0111-rotation-scaled")
+	await capture("v0112-rotation-scaled")
 	root.size = Vector2i(720, 1600)
 	await process_frame
 	await process_frame
 	game._physics_process(1.0 / 60.0)
-	await capture("v0111-rotation-tall")
+	await capture("v0112-rotation-tall")
 	await release_water(game)
 	check(game.running and game.hud.page == null and game.hud.buttons.size() == 1, "Tapping the rotated reservoir opens it and leaves only pause over gameplay")
 	check(events.has(&"click") and events.has(&"start"), "Button and individual reservoir-release sounds remain available")
@@ -277,11 +277,11 @@ func _run() -> void:
 	await release_water(game)
 	steer(game, Vector2.DOWN)
 	for frame: int in range(120): game._physics_process(1.0 / 60.0)
-	await capture("v0111-flow-close")
+	await capture("v0112-flow-close")
 	check(game.world_to_input(game.input_to_world(Vector2.DOWN)).distance_to(Vector2.DOWN) < 0.0001, "Gravity stays at the physical bottom of the screen")
 	check(game.board.hazard_edges.size() >= 4 and game.board.glass_faces > 20, "Glass has external, inner, top and bottom faces; steps have folded markings")
 	await tap(game.hud.buttons["pause"])
-	await capture("v0111-pause")
+	await capture("v0112-pause")
 	await tap(game.hud.buttons["exit"])
 	await tap(game.hud.buttons["settings"])
 	await tap(game.hud.buttons["mode_tilt"])
@@ -295,7 +295,7 @@ func _run() -> void:
 	for frame: int in range(90): game._physics_process(1.0 / 60.0)
 	check(game.pivot.rotation_degrees.length() > 4.0 and game.pivot.rotation_degrees.length() <= 9.1, "Moderate phone inclination gives visible, bounded feedback")
 	check(board_fits(game), "Enhanced phone feedback keeps the full board visible")
-	await capture("v0111-tilt-feedback")
+	await capture("v0112-tilt-feedback")
 	await check_water_visibility(game)
 	game.controls.use_rotation = true
 	game.controls.sensitivity = 1.0
@@ -311,24 +311,24 @@ func _run() -> void:
 			if game.screen == game.Screen.FINISHING and not saw_finish:
 				saw_finish = true
 				check(game.hud.page == null and not game.hud.field.active, "Delivered water stays visible before the result")
-				await capture("v0111-filled-vessel")
+				await capture("v0112-filled-vessel")
 			if frame % 120 == 0: await process_frame
 		stage += 1
-		await capture("v0111-circuit-%d" % stage)
+		await capture("v0112-circuit-%d" % stage)
 	print("Rotation-controller delivered fraction: ", game.simulation.goal_fraction)
 	check(game.simulation.completed and game.screen == game.Screen.WON, "The full circuit completes using rotation with fixed downward gravity")
 	check(saw_finish and events.count(&"complete") == 1, "Delivery delay and completion sound occur once")
-	await capture("v0111-victory")
+	await capture("v0112-victory")
 	check(game.hud.buttons.has("next"), "First-level victory presents the next-level action")
 	await tap(game.hud.buttons["next"])
 	check(game.screen == game.Screen.READY and game.level_index == 1 and game.board.source_targets.has(&"source_02"), "Next level opens the second layout with a separate sealed source")
 	check(game.board.bank_jambs == 2, "The outer-bank opening has two visible hazard jambs")
-	await capture("v0111-second-reservoir")
+	await capture("v0112-second-reservoir")
 	await tap(game.hud.buttons["pause"])
 	await tap(game.hud.buttons["exit"])
 	check(game.screen == game.Screen.MENU and game.hud.buttons["levels"].text.begins_with("02"), "The main menu identifies the selected second level")
 	await tap(game.hud.buttons["levels"])
-	await capture("v0111-level-selection")
+	await capture("v0112-level-selection")
 	check(game.hud.buttons.has_all(["level_0", "level_1"]), "Both levels can be selected directly")
 	await tap(game.hud.buttons["level_1"])
 	await tap(game.hud.buttons["play"])
@@ -343,11 +343,11 @@ func _run() -> void:
 			steer(game, Vector2.from_angle(course_angle))
 			game._physics_process(1.0 / 60.0)
 			if frame % 120 == 0: await process_frame
-		await capture("v0111-second-circuit-%d" % (level_phase + 1))
+		await capture("v0112-second-circuit-%d" % (level_phase + 1))
 	print("Second-level rotation-controller delivered fraction: ", game.simulation.goal_fraction)
 	check(game.screen == game.Screen.WON and game.simulation.completed and game.simulation.lost_without_rim == 0, "The second level completes through the actual rotation controller without terrain leaks")
 	check(not game.hud.buttons.has("next") and game.simulation.delivered_count + game.simulation.remaining_count + game.simulation.lost_count == game.level.particle_count, "The final result balances every parcel and offers no unavailable next level")
-	await capture("v0111-second-victory")
+	await capture("v0112-second-victory")
 	await tap(game.hud.buttons["win_menu"])
 	check(game.screen == game.Screen.MENU, "Second-level victory returns to its menu")
 	game.sounds.set_enabled(false)

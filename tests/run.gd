@@ -122,16 +122,18 @@ func check_curved_terrain() -> void:
 		var sample := Vector2(-0.3 + i * 0.01, 2.25)
 		continuous = continuous and SECOND.floor_height(sample) < 0.141
 	check(continuous, "The former floor gap is now a continuous stepped connection")
-	var bank := Vector2(-2.8, 2.05)
+	var bank := Vector2(-2.8, 1.19)
 	var physical_gap := false
 	var closed_adjacent := false
+	var old_opening_closed := false
 	for wall: PackedFloat32Array in SECOND.wall_segments():
 		if absf(wall[0] - SECOND.board_bounds.position.x) > 0.001 or absf(wall[2] - SECOND.board_bounds.position.x) > 0.001: continue
 		var low_z := minf(wall[1], wall[3])
 		var high_z := maxf(wall[1], wall[3])
 		if bank.y > low_z and bank.y < high_z: physical_gap = wall[5] < 0.141
 		if 0.6 > low_z and 0.6 < high_z: closed_adjacent = wall[5] > 1.25
-	check(physical_gap and closed_adjacent and is_equal_approx(SECOND.floor_height(bank), 0.14), "Only the outer bank is missing; the adjacent wall and floor remain intact")
+		if 2.05 > low_z and 2.05 < high_z: old_opening_closed = wall[5] > 1.25
+	check(physical_gap and closed_adjacent and old_opening_closed and is_equal_approx(SECOND.floor_height(bank), 0.14), "The opening is upstream; its old position, adjacent bank and floor are intact")
 	fluid.set_gate_opening(0.0)
 	check(advance(fluid, 180, Vector2.ZERO) and fluid.lost_count == 0, "The curved level retains all water in its closed source")
 	fluid = null
@@ -238,7 +240,7 @@ func _run() -> void:
 			course_frame += 1
 		check(intact(second_fluid), "Curved course preserves accounted mass through phase " + str(stage))
 	print("Curved-course delivered fraction: ", second_fluid.goal_fraction, "; side losses: ", second_fluid.lost_count)
-	check(second_fluid.completed and second_fluid.goal_fraction >= 0.8 and second_fluid.lost_without_rim == 0, "Smooth steering passes the open outer bank and completes the continuous course without terrain leaks")
+	check(second_fluid.completed and second_fluid.goal_fraction >= 0.8 and second_fluid.lost_count < SECOND.particle_count * 0.03 and second_fluid.lost_without_rim == 0, "Gentle steering completes the continuous course while retaining over 97 percent of the water")
 	second_fluid.reset()
 	course_angle = PI / 2.0
 	course_frame = 0
@@ -246,7 +248,7 @@ func _run() -> void:
 	var rough_frames: Array[int] = [100, 140, 60, 190, 400, 400]
 	for stage: int in range(rough_directions.size()):
 		for frame: int in range(rough_frames[stage]):
-			course_angle = rotate_toward(course_angle, rough_directions[stage].angle(), CURVED_COURSE.TURN_SPEED / 60.0)
+			course_angle = rotate_toward(course_angle, rough_directions[stage].angle(), 3.5 / 60.0)
 			second_fluid.set_gate_opening(minf(float(course_frame) / 12.0, 1.0))
 			second_fluid.step(1.0 / 60.0, Vector2.from_angle(course_angle))
 			course_frame += 1
