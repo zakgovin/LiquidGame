@@ -11,6 +11,7 @@ var floor_materials: Array[StandardMaterial3D] = []
 var contact_material := ShaderMaterial.new()
 var contact_bands: int = 0
 var open_edges: int = 0
+var bank_jambs: int = 0
 var _slab_edge := _material(Color("918676"), 0.85)
 var _well := _material(Color("253139"), 0.95)
 var _lowest_floor: float = 0.0
@@ -102,7 +103,9 @@ func build(level: LevelDefinition) -> void:
 		var normal := Vector2(-(b.y - a.y), b.x - a.x).normalized()
 		if level.floor_height(midpoint + normal * 0.002) > level.floor_height(midpoint - normal * 0.002): normal = -normal
 		var step := high < level.board_top - 0.001
-		var opening := level.is_void(midpoint + normal * 0.01) or level.is_void(midpoint - normal * 0.01)
+		var front := midpoint + normal * 0.01
+		var back := midpoint - normal * 0.01
+		var opening := level.is_void(front) or level.is_void(back) or not level.board_bounds.has_point(front) or not level.board_bounds.has_point(back)
 		var edge_material: Material = _slab_edge if step and opening else (_step if step else _glass)
 		_quad(Vector3(a.x, low, a.y), Vector3(b.x, low, b.y), Vector3(b.x, high, b.y), Vector3(a.x, high, a.y), Vector3(normal.x, 0, normal.y), edge_material)
 		if step and opening:
@@ -116,6 +119,7 @@ func build(level: LevelDefinition) -> void:
 		else:
 			glass_faces += 1
 			_caps.append({"a": a, "b": b, "height": high, "normal": normal})
+			_mark_bank_jamb(level, a, b, low, high, normal)
 		if not opening and is_finite(level.floor_height(midpoint + normal * 0.06)):
 			_contact_strip(a, b, low, normal, 0.17 if not step else 0.11)
 
@@ -132,6 +136,23 @@ func build(level: LevelDefinition) -> void:
 		side.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_build_reservoir(level)
 	_build_spill_cues()
+
+
+func _mark_bank_jamb(level: LevelDefinition, a: Vector2, b: Vector2, low: float, high: float, normal: Vector2) -> void:
+	# Mark the exposed ends of a missing outer bank, without an arrow that
+	# could suggest that pouring out through it is the intended route.
+	var inside := level.board_bounds.grow(-0.002)
+	var a_at_edge := not inside.has_point(a)
+	var b_at_edge := not inside.has_point(b)
+	if a_at_edge == b_at_edge: return
+	var start := a if a_at_edge else b
+	var end := b if a_at_edge else a
+	end = start + (end - start).normalized() * minf(0.06, start.distance_to(end))
+	var n := Vector3(normal.x, 0, normal.y)
+	var p := Vector3(start.x, low + 0.003, start.y) + n * 0.003
+	var q := Vector3(end.x, low + 0.003, end.y) + n * 0.003
+	_quad(p, q, Vector3(q.x, high + 0.003, q.z), Vector3(p.x, high + 0.003, p.z), n, _step)
+	bank_jambs += 1
 
 
 func _finish_caps() -> void:

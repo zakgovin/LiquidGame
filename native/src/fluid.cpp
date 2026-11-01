@@ -499,6 +499,19 @@ class NativeLiquidSolver : public RefCounted {
             if (std::max({previous.y, candidate.y, point.y}) >= top - radius) over_rim[i] = 1;
             if (!escaped[i] && !bounds.has_point(Vector2(point.x, point.z))) {
                 escaped[i] = 1;
+                // A missing bank exposes a floor-height edge rather than the
+                // board's full-height rim. Track crossing that actual edge so
+                // deliberate side spills are not reported as terrain leaks.
+                if (!over_rim[i] && bounds.has_point(Vector2(previous.x,previous.z))) {
+                    float t=1.f;
+                    if (point.x<bounds.position.x) t=std::min(t,(bounds.position.x-previous.x)/(point.x-previous.x));
+                    if (point.x>=bounds.get_end().x) t=std::min(t,(bounds.get_end().x-previous.x)/(point.x-previous.x));
+                    if (point.z<bounds.position.y) t=std::min(t,(bounds.position.y-previous.z)/(point.z-previous.z));
+                    if (point.z>=bounds.get_end().y) t=std::min(t,(bounds.get_end().y-previous.z)/(point.z-previous.z));
+                    Vector3 crossing=previous.lerp(point,clampf(t,0,1));
+                    Vector2 inside(clampf(crossing.x,bounds.position.x+.001f,bounds.get_end().x-.001f),clampf(crossing.z,bounds.position.y+.001f,bounds.get_end().y-.001f));
+                    if (crossing.y>=floor_height(inside)-radius) over_rim[i]=1;
+                }
                 // Group nearby markers into a few visible spill cues.
                 bool nearby = false;
                 for (auto p : spill_points) if (p.distance_squared_to(point) < .16f) nearby = true;

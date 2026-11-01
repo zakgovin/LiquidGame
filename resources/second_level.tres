@@ -26,7 +26,7 @@ point_count = 5
 [sub_resource type="Curve2D" id="Curve2D_ssw2f"]
 bake_interval = 0.08
 _data = {
-"points": PackedVector2Array(0, 0, 0.45, 0, 0.03, 2.25, -0.4, -0.1, 0.35, 0.1, 1.35, 2.4, 0, -0.4, 0, 0.4, 1.9, 3.15, 0, -0.4, 0, 0, 1.9, 4.25)
+"points": PackedVector2Array(0, 0, 0.45, 0, -0.23, 2.25, -0.4, -0.1, 0.35, 0.1, 1.35, 2.4, 0, -0.4, 0, 0.4, 1.9, 3.15, 0, -0.4, 0, 0, 1.9, 4.25)
 }
 point_count = 4
 
@@ -34,13 +34,12 @@ point_count = 4
 script = ExtResource("1_pc6uf")
 title = "LEVEL_SWITCHBACKS"
 description = "SWITCHBACKS_ROUTE"
-floor_regions = Array[Rect2]([Rect2(-2.6, -4.5, 1.4, 1.8), Rect2(1, 3.15, 1.8, 1.35)])
-floor_elevations = PackedFloat32Array(0.42, -0.14)
+floor_regions = Array[Rect2]([Rect2(-2.6, -4.5, 1.4, 1.8), Rect2(1, 3.15, 1.8, 1.35), Rect2(-2.95, 1.75, 0.85, 0.65)])
+floor_elevations = PackedFloat32Array(0.42, -0.14, 0.14)
 channel_curves = Array[Curve2D]([SubResource("Curve2D_e13wu"), SubResource("Curve2D_6pxmv"), SubResource("Curve2D_ovjqn"), SubResource("Curve2D_ssw2f")])
 channel_widths = PackedFloat32Array(1.25, 1.25, 1.25, 2)
 channel_end_widths = PackedFloat32Array(1.25, 1.25, 1.25, 1.6)
 channel_elevations = PackedFloat32Array(0.42, 0.28, 0.14, -0.14)
-void_regions = Array[Rect2]([Rect2(-0.15, 1.15, 1.25, 2.2)])
 camera_elevation = 70.0
 spawn = Rect2(-2.5, -4.3, 1.2, 1.5)
 goal = Rect2(1, 3.15, 1.8, 1.35)

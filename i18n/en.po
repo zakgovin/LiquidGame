@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.11.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.11.1\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -152,7 +152,7 @@ msgid "LEVEL_SWITCHBACKS"
 msgstr "Switchbacks"
 
 msgid "SWITCHBACKS_ROUTE"
-msgstr "Smooth bends and an open transfer.\nSteer gently to keep the stream clear of the gap."
+msgstr "A winding route with an opening in the outer wall.\nFollow the continuous floor without spilling over the edge."
 
 msgid "NEXT_LEVEL"
 msgstr "Next level"

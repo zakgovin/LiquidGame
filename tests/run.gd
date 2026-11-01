@@ -72,7 +72,8 @@ func release_water(game: Node) -> void:
 func channels_visible(game: Node) -> bool:
 	var toward: Vector3 = game.turntable.basis.inverse() * game.camera.global_basis.z
 	var samples := PackedVector2Array()
-	for region: Rect2 in game.level.floor_regions: samples.append(region.get_center())
+	for region: Rect2 in game.level.floor_regions:
+		if game.level.board_bounds.grow(-0.01).encloses(region): samples.append(region.get_center())
 	for curve: Curve2D in game.level.channel_curves:
 		for i: int in range(1, ceili(curve.get_baked_length() / 0.4)):
 			var sample := curve.sample_baked(i * 0.4)
@@ -102,7 +103,7 @@ func check_curved_terrain() -> void:
 			var rendered := SECOND.floor_height(sample)
 			var physical := float(fluid.native_solver().call("sample_floor", sample))
 			if is_finite(rendered) != is_finite(physical) or (is_finite(rendered) and absf(rendered - physical) > 0.0001): mismatches += 1
-	check(mismatches == 0, "Native curved terrain matches the authored floors and cutout at 3150 points")
+	check(mismatches == 0, "Native curved terrain matches the continuous floor and open bank at 3150 points")
 	var oblique := 0
 	for wall: PackedFloat32Array in SECOND.wall_segments():
 		if absf(wall[0] - wall[2]) > 0.001 and absf(wall[1] - wall[3]) > 0.001: oblique += 1
@@ -115,13 +116,22 @@ func check_curved_terrain() -> void:
 			if absf(SECOND.floor_height(centre) - float(face.height)) >= 0.001:
 				mismatched_area += absf((face.polygon[indices[i + 1]] - face.polygon[indices[i]]).cross(face.polygon[indices[i + 2]] - face.polygon[indices[i]])) * 0.5
 	check(mismatched_area < 0.00001, "Visible curved floors match their physical height within polygon-clipping precision")
-	var gap := Vector2(-0.06, 2.25)
-	var open := not is_finite(SECOND.floor_height(gap))
-	var visible_open := false
-	for polygon: PackedVector2Array in SECOND.opening_polygons(): visible_open = visible_open or Geometry2D.is_point_in_polygon(gap, polygon)
-	for polygon: PackedVector2Array in SECOND.base_patches(): open = open and not Geometry2D.is_point_in_polygon(gap, polygon)
-	for polygon: PackedVector2Array in SECOND.glass_patches(): open = open and not Geometry2D.is_point_in_polygon(gap, polygon)
-	check(open and visible_open, "The transfer gap has no hidden floor, glass bridge or base plate")
+	check(SECOND.void_regions.is_empty() and SECOND.opening_polygons().is_empty(), "The second level has no holes through its floor")
+	var continuous := true
+	for i: int in range(41):
+		var sample := Vector2(-0.3 + i * 0.01, 2.25)
+		continuous = continuous and SECOND.floor_height(sample) < 0.141
+	check(continuous, "The former floor gap is now a continuous stepped connection")
+	var bank := Vector2(-2.8, 2.05)
+	var physical_gap := false
+	var closed_adjacent := false
+	for wall: PackedFloat32Array in SECOND.wall_segments():
+		if absf(wall[0] - SECOND.board_bounds.position.x) > 0.001 or absf(wall[2] - SECOND.board_bounds.position.x) > 0.001: continue
+		var low_z := minf(wall[1], wall[3])
+		var high_z := maxf(wall[1], wall[3])
+		if bank.y > low_z and bank.y < high_z: physical_gap = wall[5] < 0.141
+		if 0.6 > low_z and 0.6 < high_z: closed_adjacent = wall[5] > 1.25
+	check(physical_gap and closed_adjacent and is_equal_approx(SECOND.floor_height(bank), 0.14), "Only the outer bank is missing; the adjacent wall and floor remain intact")
 	fluid.set_gate_opening(0.0)
 	check(advance(fluid, 180, Vector2.ZERO) and fluid.lost_count == 0, "The curved level retains all water in its closed source")
 	fluid = null
@@ -129,13 +139,21 @@ func check_curved_terrain() -> void:
 	one.particle_count = 1
 	var drop := LiquidSimulation.new(one, WATER)
 	drop.set_gate_opening(1.0)
-	drop.set_particle(0, Vector3(gap.x, 0.16, gap.y), Vector3.ZERO)
+	drop.set_particle(0, Vector3(-0.06, 0.16, 2.25), Vector3.ZERO)
 	advance(drop, 90, Vector2.ZERO)
-	check(drop.lost_count == 1 and drop.lost_in_void == 1 and drop.lost_without_rim == 0 and intact(drop), "Water falls through the real opening and its loss remains accounted for")
+	check(drop.lost_count == 0 and drop.positions[0].y >= -0.141 and intact(drop), "Stationary water rests on the repaired floor instead of falling through it")
 	drop.reset()
-	drop.set_particle(0, Vector3(-0.25, 0.18, 2.25), Vector3(1.8, 0, 0))
-	advance(drop, 30, Vector2.RIGHT)
-	check(drop.active[0] == 1 and drop.positions[0].x > 0.03 and drop.positions[0].y >= -0.141, "A steady jet crosses the opening and lands on the lower catcher")
+	drop.set_particle(0, Vector3(bank.x, 0.157, bank.y), Vector3.ZERO)
+	advance(drop, 90, Vector2.ZERO)
+	check(drop.lost_count == 0 and is_equal_approx(drop.positions[0].y, 0.157), "The floor at the wall opening supports water without any jumping")
+	drop.reset()
+	drop.set_particle(0, Vector3(bank.x, 0.157, bank.y), Vector3.ZERO)
+	advance(drop, 90, Vector2.LEFT)
+	check(drop.lost_count == 1 and drop.lost_in_void == 0 and drop.lost_without_rim == 0 and intact(drop), "Outward gravity spills water through the wall opening and accounts for that legitimate loss")
+	drop.reset()
+	drop.set_particle(0, Vector3(-2.4, 0.157, 0.6), Vector3.ZERO)
+	advance(drop, 90, Vector2.LEFT)
+	check(drop.lost_count == 0 and drop.positions[0].x > SECOND.board_bounds.position.x, "The neighboring intact bank blocks the same outward input")
 
 
 func check_curved_tilt(game: Node) -> void:
@@ -154,7 +172,7 @@ func check_curved_tilt(game: Node) -> void:
 			var gy := -sin(sensor.y)
 			Input.set_gravity(Vector3(gx, gy, sqrt(maxf(0, 1.0 - gx * gx - gy * gy))) * 9.81)
 			game._physics_process(1.0 / 60.0)
-	print("Curved phone-tilt delivered fraction: ", game.simulation.goal_fraction, "; opening losses: ", game.simulation.lost_in_void)
+	print("Curved phone-tilt delivered fraction: ", game.simulation.goal_fraction, "; side losses: ", game.simulation.lost_count)
 	check(game.screen == game.Screen.WON and game.simulation.goal_fraction >= 0.8 and game.simulation.lost_without_rim == 0 and intact(game.simulation), "Sensor input, filtering and visual feedback can complete the curved level with conserved mass")
 	Input.set_gravity(Vector3.ZERO)
 
@@ -219,21 +237,21 @@ func _run() -> void:
 			second_fluid.step(1.0 / 60.0, Vector2.from_angle(course_angle))
 			course_frame += 1
 		check(intact(second_fluid), "Curved course preserves accounted mass through phase " + str(stage))
-	print("Curved-course delivered fraction: ", second_fluid.goal_fraction, "; opening losses: ", second_fluid.lost_in_void)
-	check(second_fluid.completed and second_fluid.goal_fraction >= 0.8 and second_fluid.lost_without_rim == 0, "Smooth steering completes the curves and open transfer without terrain leaks")
+	print("Curved-course delivered fraction: ", second_fluid.goal_fraction, "; side losses: ", second_fluid.lost_count)
+	check(second_fluid.completed and second_fluid.goal_fraction >= 0.8 and second_fluid.lost_without_rim == 0, "Smooth steering passes the open outer bank and completes the continuous course without terrain leaks")
 	second_fluid.reset()
 	course_angle = PI / 2.0
 	course_frame = 0
-	var rough_directions: Array[Vector2] = [Vector2.DOWN, Vector2(1, 0.1), Vector2.DOWN, Vector2(-1, -0.18), Vector2.DOWN, Vector2.RIGHT, Vector2.DOWN]
-	var rough_frames: Array[int] = [100, 140, 60, 190, 130, 250, 400]
+	var rough_directions: Array[Vector2] = [Vector2.DOWN, Vector2(1, 0.1), Vector2.DOWN, Vector2(-1, -0.18), Vector2(1, 0.55), Vector2.DOWN]
+	var rough_frames: Array[int] = [100, 140, 60, 190, 400, 400]
 	for stage: int in range(rough_directions.size()):
 		for frame: int in range(rough_frames[stage]):
 			course_angle = rotate_toward(course_angle, rough_directions[stage].angle(), CURVED_COURSE.TURN_SPEED / 60.0)
 			second_fluid.set_gate_opening(minf(float(course_frame) / 12.0, 1.0))
 			second_fluid.step(1.0 / 60.0, Vector2.from_angle(course_angle))
 			course_frame += 1
-	print("Late-turn opening losses: ", second_fluid.lost_in_void, "; delivered: ", second_fluid.goal_fraction)
-	check(not second_fluid.completed and second_fluid.is_unwinnable() and second_fluid.lost_in_void > SECOND.particle_count * 0.2 and second_fluid.lost_without_rim == 0 and intact(second_fluid), "A late turn spills the stream through the real gap and makes the attempt unwinnable")
+	print("Outward-input side losses: ", second_fluid.lost_count, "; delivered: ", second_fluid.goal_fraction)
+	check(not second_fluid.completed and second_fluid.is_unwinnable() and second_fluid.lost_count > SECOND.particle_count * 0.2 and second_fluid.lost_in_void == 0 and second_fluid.lost_without_rim == 0 and intact(second_fluid), "Holding outward gravity spills the stream over the open bank and makes the attempt unwinnable")
 	second_fluid = null
 	fluid.reset()
 	check(not fluid.completed and fluid.held_seconds == 0.0 and fluid.lost_count == 0, "Restart restores all water and clears completion")
@@ -405,6 +423,7 @@ func _run() -> void:
 	restored.free()
 	game.camera.make_current()
 	game._start()
+	check(game.board.bank_jambs == 2 and game.board.open_edges > 0, "Both ends of the outer-bank opening are marked without a false lower landing")
 	var second_channels_clear := true
 	for i: int in range(36):
 		game._rotate_field(TAU / 36.0)
