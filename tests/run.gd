@@ -1,6 +1,7 @@
 extends SceneTree
 
 const LEVEL: LevelDefinition = preload("res://resources/first_level.tres")
+const SECOND: LevelDefinition = preload("res://resources/second_level.tres")
 const WATER: LiquidProfile = preload("res://resources/water.tres")
 const CIRCUIT: Array[Vector2] = [Vector2.DOWN, Vector2(1, 0.5), Vector2(0.5, -1), Vector2(-1, -0.5), Vector2(-0.4, 1), Vector2.DOWN]
 var failures: int = 0
@@ -71,10 +72,10 @@ func channels_visible(game: Node) -> bool:
 	# Check the line of sight from each channel centre towards the camera.
 	# A low camera lets a tall near wall cover the floor even with glass.
 	var toward_camera: Vector3 = game.turntable.basis.inverse() * game.camera.global_basis.z
-	for region: Rect2 in LEVEL.floor_regions:
+	for region: Rect2 in game.level.floor_regions:
 		var centre := region.get_center()
-		var point := Vector3(centre.x, LEVEL.floor_height(centre) + 0.01, centre.y)
-		for wall: PackedFloat32Array in LEVEL.wall_segments():
+		var point := Vector3(centre.x, game.level.floor_height(centre) + 0.01, centre.y)
+		for wall: PackedFloat32Array in game.level.wall_segments():
 			var x_face := absf(wall[0] - wall[2]) < 0.0001
 			var component := toward_camera.x if x_face else toward_camera.z
 			if absf(component) < 0.000001: continue
@@ -131,6 +132,16 @@ func _run() -> void:
 	fluid.settle(1.0 / 60.0, Vector2.ZERO)
 	check(fluid.positions != old and intact(fluid), "Explicit settling keeps the stream moving and every parcel accounted for after the threshold")
 	check(fluid.lost_without_rim == 0, "Full-circuit losses have crossed a physical rim; no water leaks through the terrain")
+	var second_fluid := LiquidSimulation.new(SECOND, WATER)
+	for direction: Vector2 in [Vector2.DOWN, Vector2.RIGHT, Vector2.DOWN]: advance(second_fluid, 360, direction)
+	print("Second-level short-route delivered fraction: ", second_fluid.goal_fraction)
+	check(not second_fluid.completed and second_fluid.goal_fraction < SECOND.required_fraction, "The short down/right/down route cannot complete the second level")
+	second_fluid.reset()
+	for direction: Vector2 in [Vector2.DOWN, Vector2(1, 0.3), Vector2.UP, Vector2(1, -0.3), Vector2.DOWN]:
+		check(advance(second_fluid, 600, direction.normalized()), "Second-level switchback preserves accounted mass through " + str(direction))
+	print("Second-level physical delivered fraction: ", second_fluid.goal_fraction, "; lost parcels: ", second_fluid.lost_count)
+	check(second_fluid.completed and second_fluid.goal_fraction >= 0.8 and second_fluid.lost_without_rim == 0, "Both opposite switchbacks complete with at least eighty percent and no terrain leaks")
+	second_fluid = null
 	fluid.reset()
 	check(not fluid.completed and fluid.held_seconds == 0.0 and fluid.lost_count == 0, "Restart restores all water and clears completion")
 	check(advance(fluid, 120, Vector2(1000, -1000)), "Extreme input is clamped and leaves a finite simulation")
@@ -247,6 +258,7 @@ func _run() -> void:
 	var game: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(game)
 	game.set_physics_process(false)
+	game._select_level(0)
 	check(game.screen == game.Screen.MENU and not game.running, "Application opens in the main menu")
 	check(not game.pivot.visible and is_equal_approx((game.hud.page.get_child(0) as ColorRect).color.a, 1.0), "Main menu hides all level geometry behind an opaque background")
 	check(game.hud.buttons.has_all(["play", "levels", "settings", "about"]), "Main menu exposes play, level navigation, settings and description")
@@ -290,9 +302,25 @@ func _run() -> void:
 	legacy.load("user://settings.cfg")
 	check(legacy.get_value("controls", "mode", "") == "rotation", "New settings persist the explicit rotation mode")
 	game._levels()
-	check(game.hud.buttons.has("level_0"), "Level selection exposes the real available level")
+	check(game.hud.buttons.has_all(["level_0", "level_1"]), "Level selection exposes both available levels")
+	game.hud.buttons["level_1"].pressed.emit()
+	check(game.screen == game.Screen.MENU and game.level_index == 1 and game.level == SECOND, "Selecting level two loads its distinct channels and receiver")
+	var restored: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	root.add_child(restored)
+	restored.set_physics_process(false)
+	check(restored.level_index == 1 and restored.level == SECOND and restored.board.source_targets.has(SECOND.reservoir_id), "A fresh application restores the selected second level before building its reservoir")
+	restored.free()
+	game.camera.make_current()
+	game._start()
+	var second_channels_clear := true
+	for i: int in range(36):
+		game._rotate_field(TAU / 36.0)
+		second_channels_clear = second_channels_clear and channels_visible(game)
+	check(second_channels_clear and not game.running, "The second level has visible channel centres throughout a full turn while its reservoir remains closed")
+	game._menu()
+	game._levels()
 	game.hud.buttons["level_0"].pressed.emit()
-	check(game.screen == game.Screen.MENU, "Selecting the level returns to its Play action")
+	check(game.screen == game.Screen.MENU and game.level_index == 0 and game.level == LEVEL, "Returning to level one restores its own geometry and Play action")
 	game._about()
 	check(not game.running and game.screen == game.Screen.ABOUT, "Description opens without running physics")
 	var credits := ""
@@ -436,6 +464,12 @@ func _run() -> void:
 	check(game.screen == game.Screen.FINISHING, "Result remains visible until the full half second has elapsed")
 	for frame: int in range(2): game._physics_process(1.0 / 60.0)
 	check(game.screen == game.Screen.WON and game.hud.buttons.has("win_menu"), "Completion modal opens after the full quiet half second")
+	check(game.hud.buttons.has("next"), "First-level victory offers the next level")
+	game.hud.buttons["next"].pressed.emit()
+	check(game.level_index == 1 and game.level == SECOND and game.screen == game.Screen.READY and game.simulation.goal_fraction == 0.0, "Next level starts the second layout with its own sealed source and fresh water")
+	game._next_level()
+	check(game.level_index == 1 and game.screen == game.Screen.READY, "The final available level cannot advance beyond the level list")
+	game._select_level(0)
 	game._restart()
 	check(game.finish_remaining == 0 and game.board.gate_open_amount == 0, "Restart clears a pending result and returns the cover")
 	release_water(game)

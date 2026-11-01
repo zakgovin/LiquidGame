@@ -10,6 +10,7 @@ signal settings_requested
 signal about_requested
 signal levels_requested
 signal level_selected(index: int)
+signal next_requested
 signal language_changed(code: String)
 signal sensitivity_changed(value: float)
 signal mode_changed(use_rotation: bool)
@@ -101,7 +102,7 @@ func _frame(parent: Control) -> Control:
 	return frame
 
 
-func show_menu(level_title: String) -> void:
+func show_menu(level_title: String, number: int = 1) -> void:
 	_clear_page()
 	pause_button.hide()
 	page = _layer()
@@ -110,7 +111,7 @@ func show_menu(level_title: String) -> void:
 	brand.position = Vector2(48, 140)
 	brand.size = Vector2(624, 412)
 	frame.add_child(brand)
-	_button("01   " + tr(level_title) + "   ›", Rect2(48, 620, 624, 104), false, func(): levels_requested.emit(), frame, "levels")
+	_button("%02d   %s   ›" % [number, tr(level_title)], Rect2(48, 620, 624, 104), false, func(): levels_requested.emit(), frame, "levels")
 	var play := _button(tr("PLAY"), Rect2(48, 752, 624, 120), true, func(): start_requested.emit(), frame, "play")
 	play.add_theme_font_size_override("font_size", 40)
 	_button(tr("SETTINGS"), Rect2(48, 904, 300, 104), false, func(): settings_requested.emit(), frame, "settings")
@@ -182,12 +183,13 @@ func _page_header(title: String) -> VBoxContainer:
 	return column
 
 
-func show_levels(level_title: String) -> void:
+func show_levels(levels: Array[LevelDefinition], selected: int) -> void:
 	var column := _page_header(tr("LEVELS"))
 	_text(tr("CHOOSE_ROUTE"), column, 30)
-	var level := _button("01   " + tr(level_title), Rect2(0, 0, 0, 120), true, func(): level_selected.emit(0), column, "level_0")
-	level.custom_minimum_size.y = 120
-	_text(tr("LEVEL_ROUTE"), column)
+	for i: int in range(levels.size()):
+		var choice := _button("%02d   %s" % [i + 1, tr(levels[i].title)], Rect2(0, 0, 0, 120), i == selected, func(): level_selected.emit(i), column, "level_%d" % i)
+		choice.custom_minimum_size.y = 120
+		_text(tr(levels[i].description), column)
 	_text(tr("LEVEL_COUNT"), column, 26)
 
 
@@ -359,14 +361,17 @@ func show_pause() -> void:
 	_button(tr("MAIN_MENU"), Rect2(96, 764, 528, 104), false, func(): menu_requested.emit(), frame, "exit")
 
 
-func show_win(delivered: int, total: int, lost: int) -> void:
+func show_win(delivered: int, total: int, lost: int, has_next: bool = false) -> void:
 	field.active = false
 	field.reset()
-	var frame := _modal_card(tr("WIN_TITLE"), 500)
+	var frame := _modal_card(tr("WIN_TITLE"), 628 if has_next else 500)
 	_center_label(tr("WIN_VOLUME") % (100.0 * delivered / total), 472, 28, MUTED, false, frame)
 	_center_label(tr("WIN_BALANCE") % [100.0 * (total - delivered - lost) / total, 100.0 * lost / total], 518, 22, MUTED, false, frame)
-	_button(tr("REPLAY"), Rect2(96, 574, 528, 104), true, func(): restart_requested.emit(), frame, "replay")
-	_button(tr("MAIN_MENU"), Rect2(96, 702, 528, 104), false, func(): menu_requested.emit(), frame, "win_menu")
+	if has_next:
+		_button(tr("NEXT_LEVEL"), Rect2(96, 574, 528, 104), true, func(): next_requested.emit(), frame, "next")
+	var offset := 128.0 if has_next else 0.0
+	_button(tr("REPLAY"), Rect2(96, 574 + offset, 528, 104), not has_next, func(): restart_requested.emit(), frame, "replay")
+	_button(tr("MAIN_MENU"), Rect2(96, 702 + offset, 528, 104), false, func(): menu_requested.emit(), frame, "win_menu")
 
 
 func show_failure() -> void:

@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="LevelDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://game/level_definition.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+title = "LEVEL_SWITCHBACKS"
+description = "SWITCHBACKS_ROUTE"
+floor_regions = Array[Rect2]([Rect2(-2.6, -4.5, 1.4, 9), Rect2(-2.6, 3.1, 3.3, 1.4), Rect2(-0.7, -4.5, 1.4, 9), Rect2(-0.7, -4.5, 3.3, 1.4), Rect2(1.2, -4.5, 1.4, 9)])
+spawn = Rect2(-2.5, -4.3, 1.2, 2)
+goal = Rect2(1.2, 2.4, 1.4, 2.1)
+particle_count = 8192
+required_fraction = 0.8
+hold_seconds = 0.75
+board_bounds = Rect2(-2.95, -4.9, 5.9, 9.8)
+route = PackedVector2Array(-1.9, -3.4, -1.9, 3.8, 0, 3.8, 0, -3.8, 1.9, -3.8, 1.9, 3.8)
+floor_elevations = PackedFloat32Array(0.42, 0.28, 0.14, 0, -0.14)
+board_top = 1.26
+base_height = -0.56
+reservoir_bounds = Rect2(-2.6, -4.5, 1.4, 1.8)
+reservoir_id = &"source_02"

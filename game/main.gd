@@ -1,7 +1,9 @@
 extends Node3D
 
 enum Screen { MENU, READY, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, FINISHING, WON, FAILED }
-const LEVEL: LevelDefinition = preload("res://resources/first_level.tres")
+const LEVELS: Array[LevelDefinition] = [preload("res://resources/first_level.tres"), preload("res://resources/second_level.tres")]
+var level_index: int = 0
+var level: LevelDefinition = LEVELS[0]
 const WATER: LiquidProfile = preload("res://resources/water.tres")
 const MAX_TILT: float = PI / 20.0 # Nine degrees; purely visual, never a second gravity.
 const ROTATION_CAMERA_ELEVATION: float = PI * 65.0 / 180.0
@@ -49,13 +51,6 @@ func _ready() -> void:
 	add_child(turntable)
 	pivot = Node3D.new()
 	turntable.add_child(pivot)
-	board = HydrologicBoard.new()
-	pivot.add_child(board)
-	board.build(LEVEL)
-	simulation = LiquidSimulation.new(LEVEL, WATER)
-	surface = FluidSurface.new(WATER)
-	pivot.add_child(surface)
-	surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
 	var canvas := CanvasLayer.new()
 	add_child(canvas)
 	hud = HydrologicHUD.new()
@@ -71,7 +66,8 @@ func _ready() -> void:
 	hud.settings_requested.connect(_settings)
 	hud.about_requested.connect(_about)
 	hud.levels_requested.connect(_levels)
-	hud.level_selected.connect(func(_index: int): _menu())
+	hud.level_selected.connect(_select_level)
+	hud.next_requested.connect(_next_level)
 	hud.language_changed.connect(_set_language)
 	hud.sensitivity_changed.connect(func(value: float):
 		controls.sensitivity = value
@@ -87,6 +83,7 @@ func _ready() -> void:
 	hud.field.tapped.connect(_tap_field)
 	hud.field.plane_vector = _rotation_vector
 	_load_settings()
+	_build_level()
 	_configure_camera()
 	controls.sensor_vector()
 	_menu()
@@ -113,7 +110,7 @@ func _physics_process(delta: float) -> void:
 		board.show_spills(simulation.spill_points)
 		_render_tick += 1
 		if _render_tick % 2 == 0:
-			surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
+			surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
 		hud.field.active = not opening and (controls.use_rotation)
 		if simulation.completed:
 			_begin_finish(world_tilt)
@@ -130,13 +127,13 @@ func _physics_process(delta: float) -> void:
 		board.show_spills(simulation.spill_points)
 		_render_tick += 1
 		if _render_tick % 2 == 0:
-			surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
+			surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
 		_finish_elapsed += delta
 		if simulation.delivered_count > _finish_delivered + 8:
 			_finish_delivered = simulation.delivered_count
 			finish_remaining = FINISH_SECONDS
 		finish_remaining = maxf(0.0, finish_remaining - delta)
-		if simulation.goal_fraction < LEVEL.required_fraction:
+		if simulation.goal_fraction < level.required_fraction:
 			screen = Screen.PLAYING
 			running = true
 			board.set_goal_complete(false)
@@ -144,7 +141,7 @@ func _physics_process(delta: float) -> void:
 		elif finish_remaining <= 0.0 or _finish_elapsed >= MAX_FINISH_SECONDS:
 			screen = Screen.WON
 			sounds.play_event(&"complete")
-			hud.show_win(simulation.delivered_count, LEVEL.particle_count, simulation.lost_count)
+			hud.show_win(simulation.delivered_count, level.particle_count, simulation.lost_count, level_index + 1 < LEVELS.size())
 	if screen != Screen.PAUSED:
 		_update_camera(delta)
 		board.advance_effects(delta)
@@ -182,9 +179,9 @@ func _fit_camera() -> void:
 		poses += [Vector3(MAX_TILT, 0, MAX_TILT), Vector3(-MAX_TILT, 0, MAX_TILT), Vector3(MAX_TILT, 0, -MAX_TILT), Vector3(-MAX_TILT, 0, -MAX_TILT)]
 	for pose: Vector3 in poses:
 		var transform_basis := Basis.from_euler(pose)
-		for x: float in [LEVEL.board_bounds.position.x, LEVEL.board_bounds.end.x]:
-			for z: float in [LEVEL.board_bounds.position.y, LEVEL.board_bounds.end.y]:
-				for y: float in [LEVEL.base_height - 0.10, LEVEL.board_top + 0.15]:
+		for x: float in [level.board_bounds.position.x, level.board_bounds.end.x]:
+			for z: float in [level.board_bounds.position.y, level.board_bounds.end.y]:
+				for y: float in [level.base_height - 0.10, level.board_top + 0.15]:
 					var point := transform_basis * Vector3(x, y, z) - camera.position
 					var projected := Vector2(camera.basis.x.dot(point), camera.basis.y.dot(point))
 					low = low.min(projected)
@@ -230,7 +227,7 @@ func _tap_field(point: Vector2) -> void:
 
 func _position_source_hint() -> void:
 	if screen != Screen.READY: return
-	hud.position_source_hint(camera.unproject_position(board.to_global(board.source_anchor(LEVEL.reservoir_id))))
+	hud.position_source_hint(camera.unproject_position(board.to_global(board.source_anchor(level.reservoir_id))))
 
 
 func _rotate_field(amount: float) -> void:
@@ -261,7 +258,41 @@ func _begin_finish(tilt: Vector2 = Vector2.ZERO) -> void:
 	_finish_tilt = tilt
 	hud.show_game(false)
 	board.set_goal_complete(true)
-	surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
+	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
+
+
+func _build_level() -> void:
+	if is_instance_valid(board): board.free()
+	# Release the previous native grid before allocating the next one.
+	simulation = null
+	level = LEVELS[level_index]
+	board = HydrologicBoard.new()
+	pivot.add_child(board)
+	board.build(level)
+	simulation = LiquidSimulation.new(level, WATER)
+	if not is_instance_valid(surface):
+		surface = FluidSurface.new(WATER)
+		pivot.add_child(surface)
+	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
+	_fit_viewport = Vector2.ZERO
+
+
+func _change_level(index: int) -> bool:
+	if index < 0 or index >= LEVELS.size(): return false
+	running = false
+	if index != level_index:
+		level_index = index
+		_build_level()
+	_save_settings()
+	return true
+
+
+func _select_level(index: int) -> void:
+	if _change_level(index): _menu()
+
+
+func _next_level() -> void:
+	if _change_level(level_index + 1): _restart()
 
 
 func _start() -> void:
@@ -286,8 +317,9 @@ func world_to_input(value: Vector2) -> Vector2:
 	return Vector2(right.dot(world), -up.dot(world)).normalized() * value.length()
 
 
-func _release(source: StringName = &"source_01") -> void:
-	if screen != Screen.READY or opening or source != LEVEL.reservoir_id: return
+func _release(source: StringName = &"") -> void:
+	if source.is_empty(): source = level.reservoir_id
+	if screen != Screen.READY or opening or source != level.reservoir_id: return
 	controls.calibrate()
 	opening = true
 	running = true
@@ -300,7 +332,7 @@ func _release(source: StringName = &"source_01") -> void:
 
 func _restart() -> void:
 	simulation.reset()
-	surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
+	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
 	pivot.show()
 	controls.filtered = Vector2.ZERO
 	pivot.rotation = Vector3.ZERO
@@ -345,7 +377,7 @@ func _menu() -> void:
 	screen = Screen.MENU
 	pivot.hide()
 	controls.filtered = Vector2.ZERO
-	hud.show_menu(LEVEL.title)
+	hud.show_menu(level.title, level_index + 1)
 
 
 func _settings() -> void:
@@ -360,7 +392,7 @@ func _levels() -> void:
 	running = false
 	screen = Screen.LEVELS
 	pivot.hide()
-	hud.show_levels(LEVEL.title)
+	hud.show_levels(LEVELS, level_index)
 
 
 func _about() -> void:
@@ -414,7 +446,7 @@ func _setup_environment() -> void:
 	environment.background_color = Color("eaf0ef")
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color("e2f0f5")
-	environment.ambient_light_energy = 0.28
+	environment.ambient_light_energy = 1.0
 	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	var sky := Sky.new()
 	var sky_material := ShaderMaterial.new()
@@ -428,20 +460,10 @@ func _setup_environment() -> void:
 	sun.rotation_degrees = Vector3(-62, -28, 0)
 	sun.light_color = Color("fff5e6")
 	sun.light_energy = 0.22
-	sun.shadow_enabled = true
-	sun.shadow_opacity = 0.33
-	sun.shadow_bias = 0.1
-	sun.shadow_normal_bias = 1.2
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-	sun.directional_shadow_max_distance = 24
+	# Volume comes from the materials and fixed studio light. No moving
+	# shadow maps, including those of the lid, hardware or transparent walls.
+	sun.shadow_enabled = false
 	add_child(sun)
-	var ground := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(200, 200)
-	ground.mesh = plane
-	ground.position.y = -1.15
-	ground.material_override = HydrologicBoard._material(Color("eaf0ef"), 1.0)
-	add_child(ground)
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
@@ -462,6 +484,7 @@ func _save_settings() -> void:
 	config.set_value("visual", "tilt_feedback", tilt_feedback)
 	config.set_value("audio", "enabled", sounds.enabled)
 	config.set_value("locale", "language", language_code)
+	config.set_value("progress", "selected_level", level_index)
 	config.save("user://settings.cfg")
 
 
@@ -474,8 +497,10 @@ func _load_settings() -> void:
 		tilt_feedback = bool(config.get_value("visual", "tilt_feedback", true))
 		sounds.set_enabled(bool(config.get_value("audio", "enabled", true)))
 		language_code = str(config.get_value("locale", "language", "ru"))
+		level_index = clampi(int(config.get_value("progress", "selected_level", 0)), 0, LEVELS.size() - 1)
 	if language_code not in ["ru", "en"]: language_code = "ru"
 	TranslationServer.set_locale(language_code)
+	if is_instance_valid(board) and level != LEVELS[level_index]: _build_level()
 
 
 func _capture() -> void:

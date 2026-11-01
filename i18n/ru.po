@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.9.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.10.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "ГИДРОЛОГИКА"
@@ -53,7 +53,7 @@ msgid "LEVEL_ROUTE"
 msgstr "Полный виток по объёмному каналу.\nСтупени, инерция и переливание в сосуд."
 
 msgid "LEVEL_COUNT"
-msgstr "В прототипе пока доступен один уровень."
+msgstr "В прототипе доступны два уровня."
 
 msgid "LANGUAGE"
 msgstr "Язык"
@@ -98,7 +98,7 @@ msgid "ABOUT_NAME"
 msgstr "Гидрологика / Hydrologic"
 
 msgid "ABOUT_GAMEPLAY"
-msgstr "Наклоняйте телефон или вращайте поле пальцем, чтобы провести воду по спирали в красный сосуд. Для победы нужно доставить не менее 80% воды."
+msgstr "Наклоняйте телефон или вращайте поле пальцем, чтобы провести воду по каналам в красный сосуд. Для победы нужно доставить не менее 80% воды."
 
 msgid "ABOUT_HEIGHTS"
 msgstr "Объёмные стеклянные стенки позволяют видеть воду. Полосатые перегибы и стрелки показывают направление спуска. Резкие движения могут расплескать воду."
@@ -147,3 +147,12 @@ msgstr "Нажмите на резервуар ↓"
 
 msgid "WIN_BALANCE"
 msgstr "На уровне %.1f%% · Потеряно %.1f%%"
+
+msgid "LEVEL_SWITCHBACKS"
+msgstr "Повороты"
+
+msgid "SWITCHBACKS_ROUTE"
+msgstr "Три канала и два разворота в разные стороны.\nПроведите поток в дальний сосуд."
+
+msgid "NEXT_LEVEL"
+msgstr "Следующий уровень"

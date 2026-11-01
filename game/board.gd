@@ -283,6 +283,7 @@ func set_goal_complete(complete: bool) -> void:
 
 func _box(size: Vector3, center: Vector3, material: Material, parent: Node = self) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var shape := BoxMesh.new()
 	shape.size = size
 	instance.mesh = shape
@@ -294,6 +295,7 @@ func _box(size: Vector3, center: Vector3, material: Material, parent: Node = sel
 
 func _cylinder(radius: float, height: float, center: Vector3, material: Material, parent: Node) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var shape := CylinderMesh.new()
 	shape.top_radius = radius
 	shape.bottom_radius = radius

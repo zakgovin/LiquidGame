@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.9.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.10.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -53,7 +53,7 @@ msgid "LEVEL_ROUTE"
 msgstr "A full loop through a 3D channel.\nGuide the water over steps into the vessel."
 
 msgid "LEVEL_COUNT"
-msgstr "One level is currently available in the prototype."
+msgstr "Two levels are available in the prototype."
 
 msgid "LANGUAGE"
 msgstr "Language"
@@ -98,7 +98,7 @@ msgid "ABOUT_NAME"
 msgstr "Hydrologic"
 
 msgid "ABOUT_GAMEPLAY"
-msgstr "Tilt your phone or rotate the board with your finger to guide water through the spiral into the red vessel. Deliver at least 80% of the water to win."
+msgstr "Tilt your phone or rotate the board with your finger to guide water through the channels into the red vessel. Deliver at least 80% of the water to win."
 
 msgid "ABOUT_HEIGHTS"
 msgstr "Solid glass walls keep the water visible. Striped step folds and arrows show the downhill direction. Sudden movements can spill water."
@@ -147,3 +147,12 @@ msgstr "Tap the reservoir ↓"
 
 msgid "WIN_BALANCE"
 msgstr "On the board %.1f%% · Spilled %.1f%%"
+
+msgid "LEVEL_SWITCHBACKS"
+msgstr "Switchbacks"
+
+msgid "SWITCHBACKS_ROUTE"
+msgstr "Three channels and two opposite U-turns.\nGuide the stream into the far vessel."
+
+msgid "NEXT_LEVEL"
+msgstr "Next level"

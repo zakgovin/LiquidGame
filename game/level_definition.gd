@@ -4,6 +4,7 @@ extends Resource
 ## elevations, finite solid walls and gravity supply the vertical geometry.
 
 @export var title: String
+@export var description: String = "LEVEL_ROUTE"
 @export var floor_regions: Array[Rect2] = []
 @export var floor_elevations := PackedFloat32Array()
 @export var outline: PackedVector2Array
