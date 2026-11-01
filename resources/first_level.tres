@@ -16,7 +16,7 @@ board_bounds = Rect2(-2.95, -4.9, 5.9, 9.8)
 route = PackedVector2Array(-1.9, -3.4, -1.9, 3.8, 1.9, 3.8, 1.9, -3.8, 0, -3.8, 0, 1.1)
 
 floor_elevations = PackedFloat32Array(0.42, 0.28, 0.14, 0, -0.14)
-board_top = 1.19
+board_top = 1.26
 base_height = -0.56
 
 reservoir_bounds = Rect2(-2.6, -4.5, 1.4, 1.8)

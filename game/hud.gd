@@ -13,7 +13,7 @@ signal levels_requested
 signal level_selected(index: int)
 signal language_changed(code: String)
 signal sensitivity_changed(value: float)
-signal mode_changed(use_touch: bool)
+signal mode_changed(use_rotation: bool)
 signal feedback_changed(enabled: bool)
 signal sound_changed(enabled: bool)
 signal interaction
@@ -116,14 +116,14 @@ func show_menu(level_title: String) -> void:
 	_button(tr("ABOUT"), Rect2(372, 904, 300, 104), false, func(): about_requested.emit(), frame, "about")
 
 
-func show_game(touch_enabled: bool) -> void:
+func show_game(rotation_enabled: bool) -> void:
 	_clear_page()
 	pause_button.show()
-	field.active = touch_enabled
+	field.active = rotation_enabled
 
 
-func show_ready(opening: bool = false) -> void:
-	show_game(false)
+func show_ready(opening: bool = false, rotate: bool = false) -> void:
+	show_game(rotate and not opening)
 	page = Control.new()
 	page.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	page.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -144,7 +144,7 @@ func show_ready(opening: bool = false) -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 14)
 	card.add_child(column)
-	var caption := _text(tr("READY_HINT"), column, 26)
+	var caption := _text(tr("READY_ROTATE_HINT") if rotate else tr("READY_HINT"), column, 26)
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var release := _button(tr("OPENING") if opening else tr("RELEASE_WATER"), Rect2(0, 0, 0, 104), true, func(): release_requested.emit(), column, "release")
 	release.custom_minimum_size.y = 104
@@ -191,15 +191,16 @@ func show_levels(level_title: String) -> void:
 	_text(tr("LEVEL_COUNT"), column, 26)
 
 
-func show_settings(sensitivity: float, use_touch: bool, feedback: bool, sensor: bool, sound: bool = true, language: String = "ru") -> void:
+func show_settings(sensitivity: float, use_rotation: bool, feedback: bool, sensor: bool, sound: bool = true, language: String = "ru") -> void:
 	var content := _page_header(tr("SETTINGS"))
 	var language_group := _settings_card(content)
 	_text(tr("LANGUAGE"), language_group, 32, true, INK)
 	_segments(["Русский", "English"], ["language_ru", "language_en"], 1 if language == "en" else 0, language_group, func(choice: int): language_changed.emit("en" if choice == 1 else "ru"))
 	var controls_group := _settings_card(content)
 	_text(tr("CONTROLS"), controls_group, 32, true, INK)
-	_segments([tr("MODE_TILT"), tr("MODE_TOUCH")], ["mode_tilt", "mode_touch"], 1 if use_touch else 0, controls_group, func(choice: int): mode_changed.emit(choice == 1))
-	if not sensor: _text(tr("NO_SENSOR"), controls_group, 24)
+	_segments([tr("MODE_TILT"), tr("MODE_ROTATE")], ["mode_tilt", "mode_rotate"], 1 if use_rotation else 0, controls_group, func(choice: int): mode_changed.emit(choice == 1))
+	if not sensor and not use_rotation: _text(tr("NO_SENSOR"), controls_group, 24)
+	if use_rotation: _text(tr("ROTATION_HELP"), controls_group, 24)
 	var sensitivity_group := _settings_card(content)
 	sensitivity_group.name = "SensitivityGroup"
 	var value_row := HBoxContainer.new()
@@ -243,10 +244,11 @@ func show_settings(sensitivity: float, use_touch: bool, feedback: bool, sensor: 
 	var faster := _text(tr("FASTER"), limits, 24)
 	faster.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	faster.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_text(tr("CONTROL_HELP"), sensitivity_group, 24)
+	_text(tr("ROTATION_SENSITIVITY") if use_rotation else tr("CONTROL_HELP"), sensitivity_group, 24)
 	var feedback_group := _settings_card(content)
 	_text(tr("FEEDBACK"), feedback_group, 32, true, INK)
-	feedback_toggle = _switch(tr("TILT_FEEDBACK"), tr("TILT_DESCRIPTION"), feedback, feedback_group)
+	feedback_toggle = _switch(tr("TILT_FEEDBACK"), tr("TILT_ONLY") if use_rotation else tr("TILT_DESCRIPTION"), feedback, feedback_group)
+	feedback_toggle.disabled = use_rotation
 	feedback_toggle.toggled.connect(func(value: bool):
 		feedback_changed.emit(value)
 		interaction.emit())

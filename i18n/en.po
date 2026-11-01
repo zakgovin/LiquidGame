@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.6.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.7.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -64,9 +64,6 @@ msgstr "Controls"
 msgid "MODE_TILT"
 msgstr "Tilt"
 
-msgid "MODE_TOUCH"
-msgstr "Touch"
-
 msgid "SENSITIVITY"
 msgstr "Sensitivity"
 
@@ -80,7 +77,7 @@ msgid "CONTROL_HELP"
 msgstr "Your phone position is set as neutral when you release the water.\nAt ×1: a 6° neutral zone, full tilt at 36°."
 
 msgid "NO_SENSOR"
-msgstr "No motion sensor found. Touch control is available."
+msgstr "No motion sensor found. Choose Rotate mode."
 
 msgid "FEEDBACK"
 msgstr "Feedback"
@@ -89,7 +86,7 @@ msgid "TILT_FEEDBACK"
 msgstr "Board tilt"
 
 msgid "TILT_DESCRIPTION"
-msgstr "Gently tilt the scene with your phone"
+msgstr "Visibly tilt the board with your phone"
 
 msgid "SOUNDS"
 msgstr "Game sounds"
@@ -101,10 +98,10 @@ msgid "ABOUT_NAME"
 msgstr "Hydrologic"
 
 msgid "ABOUT_GAMEPLAY"
-msgstr "Release the water and tilt your phone to guide it through the spiral into the red vessel. Deliver at least 80% of the water to win."
+msgstr "Tilt your phone or rotate the board with your finger to guide water through the spiral into the red vessel. Deliver at least 80% of the water to win."
 
 msgid "ABOUT_HEIGHTS"
-msgstr "Transparent walls keep the water visible. Edge markings show walls and steps. Sudden movements can spill water."
+msgstr "Solid glass walls keep the water visible. Striped step folds and arrows show the downhill direction. Sudden movements can spill water."
 
 msgid "ABOUT_PAUSE"
 msgstr "Pause stops the flow. You can restart the level or return to the main menu."
@@ -129,3 +126,18 @@ msgstr "Water spilled"
 
 msgid "FAIL_HINT"
 msgstr "Not enough water remains"
+
+msgid "MODE_ROTATE"
+msgstr "Rotate"
+
+msgid "ROTATION_HELP"
+msgstr "Drag around the centre of the level. Water always flows towards the bottom of the screen."
+
+msgid "READY_ROTATE_HINT"
+msgstr "Rotate the board with your finger.\nRelease the water when you are ready."
+
+msgid "ROTATION_SENSITIVITY"
+msgstr "Sensitivity changes how quickly the board turns with your finger."
+
+msgid "TILT_ONLY"
+msgstr "Available in Tilt mode"

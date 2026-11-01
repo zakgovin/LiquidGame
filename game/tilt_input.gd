@@ -8,9 +8,8 @@ const FULL_ANGLE: float = PI / 5.0
 var sensitivity: float = 1.0
 var neutral := Vector2.ZERO
 var filtered := Vector2.ZERO
-var touch := Vector2.ZERO
 var has_sensor: bool = false
-var use_touch: bool = false
+var use_rotation: bool = false
 
 
 func sensor_vector() -> Vector2:
@@ -30,16 +29,14 @@ func calibrate() -> void:
 func sample(delta: float) -> Vector2:
 	var angles := sensor_vector()
 	var desired := Vector2.ZERO
-	if has_sensor and not use_touch:
+	if has_sensor and not use_rotation:
 		var relative := angles - neutral
 		var magnitude := relative.length()
 		if magnitude > DEAD_ANGLE:
 			desired = relative / magnitude * clampf((magnitude - DEAD_ANGLE) / (FULL_ANGLE - DEAD_ANGLE) * sensitivity, 0.0, 1.0)
-	if use_touch or touch.length_squared() > 0.0:
-		desired = touch * sensitivity
 	var keyboard := Vector2(
 		float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT)),
 		float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)))
-	if keyboard.length_squared() > 0.0: desired = keyboard.normalized()
+	if not use_rotation and keyboard.length_squared() > 0.0: desired = keyboard.normalized()
 	filtered = filtered.lerp(desired.limit_length(1.0), 1.0 - exp(-10.0 * delta))
 	return filtered

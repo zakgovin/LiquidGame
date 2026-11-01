@@ -14,7 +14,7 @@ extends Resource
 @export var required_fraction: float = 0.8
 @export var hold_seconds: float = 0.75
 @export var board_bounds: Rect2 = Rect2(-2.95, -4.9, 5.9, 9.8)
-@export var board_top: float = 1.19
+@export var board_top: float = 1.26
 @export var base_height: float = -0.56
 @export var route: PackedVector2Array
 var _tiles: Array[Dictionary] = []

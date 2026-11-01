@@ -146,6 +146,7 @@ func _run() -> void:
 	var mesh_data: Dictionary = fluid.native_solver().call("build_surface")
 	var vertices: PackedVector3Array = mesh_data.vertices
 	var normals: PackedVector3Array = mesh_data.normals
+	var depths: PackedColorArray = mesh_data.colors
 	low = INF
 	high = -INF
 	var finite_mesh := vertices.size() > 0 and normals.size() == vertices.size()
@@ -178,6 +179,12 @@ func _run() -> void:
 		spray_fraction = maxf(spray_fraction, isolated_fraction(fluid))
 	print("Gentle-flow maximum isolated fraction: ", spray_fraction)
 	check(spray_fraction < 0.01 and intact(fluid) and fluid.lost_count < LEVEL.particle_count * 0.01, "Gentle flow keeps over 99% of markers in connected neighborhoods and retains over 99% of its volume")
+	var depths_valid := depths.size() == vertices.size()
+	var depth_max := 0.0
+	for depth: Color in depths:
+		depths_valid = depths_valid and is_finite(depth.r) and depth.r >= 0.0 and depth.r <= 1.0
+		depth_max = maxf(depth_max, depth.r)
+	check(depths_valid and depth_max > 0.10, "Water carries finite local depth without requiring a scene-depth texture")
 	var input := TiltInput.new()
 	Input.set_gravity(Vector3(0, 0, 9.81))
 	input.calibrate()
@@ -219,17 +226,28 @@ func _run() -> void:
 	game.hud.sound_toggle.button_pressed = true
 	check(game.sounds.enabled, "Sound switch restores feedback")
 	game.hud.slider.value = 1.4
-	game.hud.buttons["mode_touch"].button_pressed = true
-	game.hud.buttons["mode_touch"].pressed.emit()
+	game.hud.buttons["mode_rotate"].button_pressed = true
+	game.hud.buttons["mode_rotate"].pressed.emit()
 	game.hud.feedback_toggle.button_pressed = false
-	check(is_equal_approx(game.controls.sensitivity, 1.4) and game.controls.use_touch and not game.tilt_feedback, "Settings update controls and visual feedback")
+	check(is_equal_approx(game.controls.sensitivity, 1.4) and game.controls.use_rotation and not game.tilt_feedback, "Settings update controls and visual feedback")
 	game.controls.sensitivity = 1.0
-	game.controls.use_touch = true
+	game.controls.use_rotation = true
 	game.tilt_feedback = true
 	game._save_settings()
 	game.controls.sensitivity = 0.5
 	game._load_settings()
-	check(is_equal_approx(game.controls.sensitivity, 1.0) and game.controls.use_touch and game.tilt_feedback, "Settings survive a configuration reload")
+	check(is_equal_approx(game.controls.sensitivity, 1.0) and game.controls.use_rotation and game.tilt_feedback, "Settings survive a configuration reload")
+	var legacy := ConfigFile.new()
+	legacy.set_value("controls", "use_touch", true)
+	legacy.set_value("controls", "sensitivity", 1.0)
+	legacy.set_value("locale", "language", "ru")
+	legacy.save("user://settings.cfg")
+	game.controls.use_rotation = false
+	game._load_settings()
+	check(game.controls.use_rotation, "An existing Touch preference migrates to Rotate mode")
+	game._save_settings()
+	legacy.load("user://settings.cfg")
+	check(legacy.get_value("controls", "mode", "") == "rotation", "New settings persist the explicit rotation mode")
 	game._levels()
 	check(game.hud.buttons.has("level_0"), "Level selection exposes the real available level")
 	game.hud.buttons["level_0"].pressed.emit()
@@ -240,9 +258,11 @@ func _run() -> void:
 	for label: Node in game.hud.page.find_children("*", "Label", true, false): credits += label.text
 	check("Zakhar Govin" in credits and "Codex (OpenAI)" in credits, "Description credits both game authors")
 	game._menu()
+	game.controls.use_rotation = false
 	game._start()
 	var waiting: PackedVector3Array = game.simulation.positions.duplicate()
-	game.controls.touch = Vector2(1, 1)
+	game.controls.use_rotation = false
+	Input.set_gravity(Vector3(3, -3, 8.8))
 	for frame: int in range(120): game._physics_process(1.0 / 60.0)
 	check(game.screen == game.Screen.READY and not game.running and waiting == game.simulation.positions, "Closed reservoir holds all water regardless of phone input before release")
 	check(game.board.reservoir.visible and not game.hud.field.active, "Reservoir is visibly closed and gameplay gestures wait for release")
@@ -266,9 +286,9 @@ func _run() -> void:
 	check(game.board.gate_open_amount >= 0.999 and game.running and not game.opening, "Released lid leaves the field while its collar remains")
 	check(game.running and game.hud.page == null and game.hud.buttons.size() == 1, "Gameplay contains only the scene, invisible input and pause button")
 	check(game.pivot.visible, "Play restores the visible 3D level")
-	game.controls.touch = Vector2.RIGHT
+	Input.set_gravity(Vector3(8, 0, 5))
 	for frame: int in range(30): game._physics_process(1.0 / 60.0)
-	check(game.pivot.rotation.z < -0.02 and game.pivot.rotation.length() <= game.MAX_TILT + 0.001, "Screen-right inclination lowers the correct side with bounded visual feedback")
+	check(game.pivot.rotation.z < -0.06 and game.pivot.rotation.length() <= game.MAX_TILT + 0.001, "Phone inclination visibly lowers the correct side within nine degrees")
 	check(game.world_to_input(game.input_to_world(Vector2(0.7, -0.3))).distance_to(Vector2(0.7, -0.3)) < 0.0001, "Camera projection maps screen input and world gravity consistently")
 	var corners_fit := true
 	for point: Vector2 in [LEVEL.board_bounds.position, Vector2(LEVEL.board_bounds.end.x, LEVEL.board_bounds.position.y), LEVEL.board_bounds.end, Vector2(LEVEL.board_bounds.position.x, LEVEL.board_bounds.end.y)]:
@@ -291,7 +311,7 @@ func _run() -> void:
 	release_water(game)
 	game._pause()
 	game._resume()
-	check(game.running and game.controls.touch == Vector2.ZERO, "Resume clears stale touch input")
+	check(game.running and not game.hud.field.is_dragging(), "Resume clears a stale rotation gesture")
 	game._notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_OUT)
 	check(game.screen == game.Screen.PAUSED, "Backgrounding gameplay opens pause")
 	game._restart()
@@ -302,7 +322,40 @@ func _run() -> void:
 	game._menu()
 	game._notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_OUT)
 	check(game.screen == game.Screen.MENU, "Backgrounding the main menu does not create a pause dialog")
-	game._start()
+	game.controls.use_rotation = true
+	game.controls.sensitivity = 1.0
+	game._restart()
+	var enclosed: PackedVector3Array = game.simulation.positions.duplicate()
+	var down_consistent := true
+	var rotation_fits := true
+	for turn: float in [PI / 2.0, -PI, PI / 4.0, PI]:
+		game.hud.field.rotation_changed.emit(turn)
+		var gravity_screen: Vector2 = game.world_to_input(game.input_to_world(Vector2.DOWN))
+		down_consistent = down_consistent and gravity_screen.distance_to(Vector2.DOWN) < 0.0001
+		for x: float in [LEVEL.board_bounds.position.x, LEVEL.board_bounds.end.x]:
+			for z: float in [LEVEL.board_bounds.position.y, LEVEL.board_bounds.end.y]:
+				for y: float in [LEVEL.base_height - 0.08, LEVEL.board_top + 0.12]:
+					rotation_fits = rotation_fits and root.get_visible_rect().has_point(game.camera.unproject_position(Vector3(x, y, z)))
+	check(down_consistent and absf(game.rotation_angle) > 0.1, "Rotating the board changes its orientation while screen gravity stays down")
+	check(rotation_fits, "The complete glass volume fits at both clockwise and counterclockwise orientations")
+	check(enclosed == game.simulation.positions and game.hud.field.active, "Preparing the board allows rotation while all water remains enclosed")
+	var retained_angle: float = game.rotation_angle
+	game._pause()
+	game.hud.field.rotation_changed.emit(PI / 2.0)
+	check(is_equal_approx(game.rotation_angle, retained_angle), "Paused gameplay rejects rotation gestures")
+	game._resume()
+	check(is_equal_approx(game.rotation_angle, retained_angle), "Continue preserves the board orientation")
+	var phone_independent: PackedVector3Array
+	for trial: int in range(2):
+		Input.set_gravity(Vector3(0, 0, 9.81) if trial == 0 else Vector3(6, -5, 5))
+		game._restart()
+		game._rotate_field(0.6)
+		release_water(game)
+		for frame: int in range(90): game._physics_process(1.0 / 60.0)
+		if trial == 0: phone_independent = game.simulation.positions.duplicate()
+		else: check(phone_independent == game.simulation.positions, "Rotate mode produces the same flow regardless of phone inclination")
+	game._restart()
+	check(game.rotation_angle == 0.0, "Restart restores the original board orientation")
 	release_water(game)
 	game._begin_finish()
 	check(game.screen == game.Screen.FINISHING and game.hud.page == null and not game.hud.field.active, "Delivery leaves the vessel visible before showing completion")

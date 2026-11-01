@@ -12,4 +12,4 @@ extends Resource
 @export var particle_spacing: float = 0.038
 @export var particle_radius: float = 0.017
 @export var drag: float = 0.015
-@export var max_speed: float = 3.0
+@export var max_speed: float = 3.2

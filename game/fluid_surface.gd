@@ -23,4 +23,5 @@ func rebuild(_particles: PackedVector3Array, _level: LevelDefinition, _active: P
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_NORMAL] = data.normals
+	arrays[Mesh.ARRAY_COLOR] = data.colors
 	_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)

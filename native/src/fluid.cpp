@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
@@ -526,7 +527,16 @@ class NativeLiquidSolver : public RefCounted {
             std::copy(surface_vertices.begin(), surface_vertices.end(), vertices_out.ptrw());
             std::copy(surface_normals.begin(), surface_normals.end(), normals_out.ptrw());
         }
-        Dictionary result; result["vertices"] = vertices_out; result["normals"] = normals_out; return result;
+        // Supply real local water depth instead of relying on a mobile
+        // driver's scene-depth texture or clip-space conventions.
+        PackedColorArray colors_out; colors_out.resize(surface_vertices.size());
+        Color *colors = colors_out.ptrw();
+        for (size_t i=0;i<surface_vertices.size();++i) {
+            Vector3 p=surface_vertices[i]; float floor=floor_height(Vector2(p.x,p.z));
+            float depth=std::isfinite(floor) ? clampf(p.y-floor,0,1) : 0;
+            colors[i]=Color(depth,0,0,1);
+        }
+        Dictionary result; result["vertices"] = vertices_out; result["normals"] = normals_out; result["colors"] = colors_out; return result;
     }
 
 protected:
@@ -601,7 +611,7 @@ public:
         if (!gate_controlled) set_gate_opening(1);
         float duration = float(std::min(delta, 1. / 30.));
         tilt = tilt.length_squared() > 1 ? tilt.normalized() : tilt;
-        Vector3 gravity = Vector3(tilt.x * .5f, -1, tilt.y * .5f).normalized() * 9.81f;
+        Vector3 gravity = Vector3(tilt.x * .60f, -1, tilt.y * .60f).normalized() * 9.81f;
         int steps = std::max(1,int(std::ceil(duration * 60.f - 1e-5f)));
         float dt = duration / steps;
         for (int i = 0; i < steps; ++i) substep(dt,gravity);

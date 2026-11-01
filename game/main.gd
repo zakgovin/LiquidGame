@@ -3,7 +3,7 @@ extends Node3D
 enum Screen { MENU, READY, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, FINISHING, WON, FAILED }
 const LEVEL: LevelDefinition = preload("res://resources/first_level.tres")
 const WATER: LiquidProfile = preload("res://resources/water.tres")
-const MAX_TILT: float = PI / 45.0 # Four degrees; purely visual, never a second gravity.
+const MAX_TILT: float = PI / 20.0 # Nine degrees; purely visual, never a second gravity.
 
 var simulation: LiquidSimulation
 var controls := TiltInput.new()
@@ -28,6 +28,9 @@ const FINISH_SECONDS: float = 0.50
 var finish_remaining: float = 0.0
 var _camera_size: float = 8.35
 var _camera_offset: float = 0.0
+var _camera_horizontal: float = 0.0
+var _camera_basis := Basis.IDENTITY
+var rotation_angle: float = 0.0
 
 
 func _ready() -> void:
@@ -63,16 +66,14 @@ func _ready() -> void:
 	hud.sensitivity_changed.connect(func(value: float):
 		controls.sensitivity = value
 		_save_settings())
-	hud.mode_changed.connect(func(value: bool):
-		controls.use_touch = value
-		_save_settings())
+	hud.mode_changed.connect(_set_control_mode)
 	hud.feedback_changed.connect(func(value: bool):
 		tilt_feedback = value
 		_save_settings())
 	hud.sound_changed.connect(func(value: bool):
 		sounds.set_enabled(value)
 		_save_settings())
-	hud.field.vector_changed.connect(func(value: Vector2): controls.touch = value)
+	hud.field.rotation_changed.connect(_rotate_field)
 	_load_settings()
 	controls.sensor_vector()
 	_menu()
@@ -86,21 +87,21 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	var tilt := controls.sample(delta)
-	var world_tilt := input_to_world(tilt)
+	var world_tilt := input_to_world(Vector2.DOWN if controls.use_rotation else tilt)
 	if screen == Screen.PLAYING and opening:
 		_opening_remaining = maxf(0.0, _opening_remaining - delta)
 		board.set_reservoir_open_amount(1.0 - _opening_remaining / OPEN_SECONDS)
 		simulation.set_gate_opening(minf((1.0 - _opening_remaining / OPEN_SECONDS) / 0.30, 1.0))
 		if _opening_remaining <= 0.0:
 			opening = false
-			hud.show_game(controls.use_touch or not controls.has_sensor)
+			hud.show_game(controls.use_rotation)
 			_fit_camera()
 	if running:
 		simulation.step(delta, world_tilt)
 		_render_tick += 1
 		if _render_tick % 2 == 0:
 			surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
-		hud.field.active = not opening and (controls.use_touch or not controls.has_sensor)
+		hud.field.active = not opening and (controls.use_rotation)
 		if simulation.completed:
 			_begin_finish()
 			return
@@ -115,11 +116,11 @@ func _physics_process(delta: float) -> void:
 			screen = Screen.WON
 			hud.show_win(simulation.goal_fraction)
 	if screen != Screen.PAUSED:
-		camera.size = lerpf(camera.size, _camera_size, 1.0 - exp(-5.0 * delta))
-		camera.v_offset = lerpf(camera.v_offset, _camera_offset, 1.0 - exp(-5.0 * delta))
+		_update_camera(delta)
 	var target := Vector3.ZERO
-	if tilt_feedback and screen == Screen.PLAYING:
-		target = Vector3(world_tilt.y * MAX_TILT, 0.0, -world_tilt.x * MAX_TILT)
+	if tilt_feedback and not controls.use_rotation and screen == Screen.PLAYING:
+		var visible_tilt := world_tilt.normalized() * sqrt(world_tilt.length())
+		target = Vector3(visible_tilt.y * MAX_TILT, 0.0, -visible_tilt.x * MAX_TILT)
 	if screen != Screen.PAUSED:
 		pivot.rotation = pivot.rotation.lerp(target, 1.0 - exp(-7.5 * delta))
 	if _screenshot_frame > 0:
@@ -129,18 +130,65 @@ func _physics_process(delta: float) -> void:
 
 
 func _fit_camera() -> void:
-	var viewport_size := get_viewport().get_visible_rect().size
+	if not is_instance_valid(pivot) or not is_instance_valid(hud): return
+	var viewport_size := hud.size
+	if viewport_size.x <= 0.0: viewport_size = get_viewport().get_visible_rect().size
 	var preparing := screen == Screen.READY or opening
-	var reserved := 440.0 if preparing else 180.0
-	_camera_size = maxf(8.35, 10.4 * viewport_size.x / maxf(500.0, viewport_size.y - reserved))
-	_camera_offset = -80.0 * _camera_size / viewport_size.x if preparing else 0.0
+	var top := 136.0
+	var bottom := 298.0 if preparing else 48.0
+	var low := Vector2(INF, INF)
+	var high := Vector2(-INF, -INF)
+	var poses: Array[Vector3] = [Vector3.ZERO]
+	if tilt_feedback and not controls.use_rotation:
+		poses += [Vector3(MAX_TILT, 0, MAX_TILT), Vector3(-MAX_TILT, 0, MAX_TILT), Vector3(MAX_TILT, 0, -MAX_TILT), Vector3(-MAX_TILT, 0, -MAX_TILT)]
+	for pose: Vector3 in poses:
+		var transform_basis := Basis.from_euler(pose)
+		for x: float in [LEVEL.board_bounds.position.x, LEVEL.board_bounds.end.x]:
+			for z: float in [LEVEL.board_bounds.position.y, LEVEL.board_bounds.end.y]:
+				for y: float in [LEVEL.base_height - 0.10, LEVEL.board_top + 0.15]:
+					var point := transform_basis * Vector3(x, y, z) - camera.position
+					var projected := Vector2(camera.basis.x.dot(point), camera.basis.y.dot(point))
+					low = low.min(projected)
+					high = high.max(projected)
+	var extent := high - low
+	_camera_size = maxf(extent.x * viewport_size.x / maxf(300.0, viewport_size.x - 64.0), extent.y * viewport_size.x / maxf(420.0, viewport_size.y - top - bottom))
+	_camera_horizontal = (high.x + low.x) * 0.5
+	_camera_offset = (high.y + low.y) * 0.5 + (top - bottom) * 0.5 * camera.size / viewport_size.x
+	hud.field.centre = Vector2(viewport_size.x * 0.5, (top + viewport_size.y - bottom) * 0.5)
+	hud.field.blocked_bottom = bottom if preparing else 0.0
+
+
+func _update_camera(delta: float) -> void:
+	_fit_camera()
+	# Widen immediately during a turn so no wall leaves the screen; ease in.
+	camera.size = maxf(_camera_size, lerpf(camera.size, _camera_size, 1.0 - exp(-8.0 * delta)))
+	_fit_camera()
+	camera.h_offset = _camera_horizontal
+	camera.v_offset = _camera_offset if controls.use_rotation else lerpf(camera.v_offset, _camera_offset, 1.0 - exp(-8.0 * delta))
+
+
+func _rotate_field(amount: float) -> void:
+	if not controls.use_rotation or screen not in [Screen.READY, Screen.PLAYING] or opening: return
+	rotation_angle = wrapf(rotation_angle + amount * controls.sensitivity, -PI, PI)
+	camera.basis = _camera_basis * Basis(Vector3.BACK, rotation_angle)
+	_update_camera(0.0)
+
+
+func _set_control_mode(rotate: bool) -> void:
+	var scroll_position := hud.settings_scroll.scroll_vertical
+	controls.use_rotation = rotate
+	controls.filtered = Vector2.ZERO
+	rotation_angle = 0.0
+	camera.basis = _camera_basis
+	_save_settings()
+	_settings()
+	hud.settings_scroll.set_deferred("scroll_vertical", scroll_position)
 
 
 func _begin_finish() -> void:
 	running = false
 	screen = Screen.FINISHING
 	finish_remaining = FINISH_SECONDS
-	controls.touch = Vector2.ZERO
 	hud.show_game(false)
 	board.set_goal_complete(true)
 	surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
@@ -170,13 +218,12 @@ func world_to_input(value: Vector2) -> Vector2:
 func _release() -> void:
 	if screen != Screen.READY or opening: return
 	controls.calibrate()
-	controls.touch = Vector2.ZERO
 	opening = true
 	running = true
 	screen = Screen.PLAYING
 	simulation.set_gate_opening(0.0)
 	_opening_remaining = OPEN_SECONDS
-	hud.show_ready(true)
+	hud.show_ready(true, controls.use_rotation)
 	sounds.play_event(&"start")
 
 
@@ -185,8 +232,9 @@ func _restart() -> void:
 	surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
 	pivot.show()
 	controls.filtered = Vector2.ZERO
-	controls.touch = Vector2.ZERO
 	pivot.rotation = Vector3.ZERO
+	rotation_angle = 0.0
+	camera.basis = _camera_basis
 	board.set_reservoir_open_amount(0.0)
 	board.set_goal_complete(false)
 	finish_remaining = 0.0
@@ -196,7 +244,8 @@ func _restart() -> void:
 	_fit_camera()
 	camera.size = _camera_size
 	camera.v_offset = _camera_offset
-	hud.show_ready()
+	hud.show_ready(false, controls.use_rotation)
+	_fit_camera()
 
 
 func _pause() -> void:
@@ -211,20 +260,18 @@ func _resume() -> void:
 	if screen != Screen.PAUSED:
 		return
 	controls.filtered = Vector2.ZERO
-	controls.touch = Vector2.ZERO
 	screen = _paused_from
 	running = screen == Screen.PLAYING
-	if running and opening: hud.show_ready(true)
-	elif running: hud.show_game(controls.use_touch or not controls.has_sensor)
+	if running and opening: hud.show_ready(true, controls.use_rotation)
+	elif running: hud.show_game(controls.use_rotation)
 	elif screen == Screen.FINISHING: hud.show_game(false)
-	else: hud.show_ready(opening)
+	else: hud.show_ready(opening, controls.use_rotation)
 
 
 func _menu() -> void:
 	running = false
 	screen = Screen.MENU
 	pivot.hide()
-	controls.touch = Vector2.ZERO
 	controls.filtered = Vector2.ZERO
 	hud.show_menu(LEVEL.title)
 
@@ -234,7 +281,7 @@ func _settings() -> void:
 	screen = Screen.SETTINGS
 	pivot.hide()
 	controls.sensor_vector()
-	hud.show_settings(controls.sensitivity, controls.use_touch, tilt_feedback, controls.has_sensor, sounds.enabled, language_code)
+	hud.show_settings(controls.sensitivity, controls.use_rotation, tilt_feedback, controls.has_sensor, sounds.enabled, language_code)
 
 
 func _levels() -> void:
@@ -272,6 +319,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
 			_back()
+		elif controls.use_rotation and event.keycode in [KEY_Q, KEY_E]:
+			_rotate_field(deg_to_rad(15.0) * (1.0 if event.keycode == KEY_E else -1.0))
 		elif event.keycode == KEY_R and (screen in [Screen.PLAYING, Screen.READY, Screen.FINISHING]):
 			_restart()
 
@@ -296,11 +345,8 @@ func _setup_environment() -> void:
 	environment.ambient_light_energy = 0.28
 	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	var sky := Sky.new()
-	var sky_material := ProceduralSkyMaterial.new()
-	sky_material.sky_top_color = Color("9dbad0")
-	sky_material.sky_horizon_color = Color("f3f8fa")
-	sky_material.ground_horizon_color = Color("e1edf2")
-	sky_material.ground_bottom_color = Color("a7bdc9")
+	var sky_material := ShaderMaterial.new()
+	sky_material.shader = preload("res://assets/materials/reflection_sky.gdshader")
 	sky.sky_material = sky_material
 	environment.sky = sky
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
@@ -332,6 +378,7 @@ func _setup_environment() -> void:
 	camera.far = 100.0
 	add_child(camera)
 	camera.look_at(Vector3(0, 0.2, 0))
+	_camera_basis = camera.basis
 	camera.current = true
 	get_viewport().size_changed.connect(_fit_camera)
 
@@ -339,7 +386,7 @@ func _setup_environment() -> void:
 func _save_settings() -> void:
 	var config := ConfigFile.new()
 	config.set_value("controls", "sensitivity", controls.sensitivity)
-	config.set_value("controls", "use_touch", controls.use_touch)
+	config.set_value("controls", "mode", "rotation" if controls.use_rotation else "tilt")
 	config.set_value("visual", "tilt_feedback", tilt_feedback)
 	config.set_value("audio", "enabled", sounds.enabled)
 	config.set_value("locale", "language", language_code)
@@ -350,7 +397,8 @@ func _load_settings() -> void:
 	var config := ConfigFile.new()
 	if config.load("user://settings.cfg") == OK:
 		controls.sensitivity = clampf(float(config.get_value("controls", "sensitivity", 1.0)), 0.5, 1.8)
-		controls.use_touch = bool(config.get_value("controls", "use_touch", false))
+		var legacy_rotation := bool(config.get_value("controls", "use_touch", false))
+		controls.use_rotation = str(config.get_value("controls", "mode", "rotation" if legacy_rotation else "tilt")) == "rotation"
 		tilt_feedback = bool(config.get_value("visual", "tilt_feedback", true))
 		sounds.set_enabled(bool(config.get_value("audio", "enabled", true)))
 		language_code = str(config.get_value("locale", "language", "ru"))
