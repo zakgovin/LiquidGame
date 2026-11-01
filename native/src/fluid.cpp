@@ -39,6 +39,7 @@ class NativeLiquidSolver : public RefCounted {
     float top = 1.05f, base = -.56f, spacing = .038f, radius = .017f;
     float cell_size = .07f, mass_density = 1000, viscosity = .000001f;
     float drag = .015f, max_speed = 3, flip_ratio = .95f;
+    float surface_tension = .072f;
     float required = .8f, hold_seconds = .75f, fraction = 0, held = 0;
     float maximum_divergence = 0, liquid_volume = 0;
     int count = 0, lost = 0, nx = 0, ny = 0, nz = 0, plane = 0, total = 0;
@@ -51,6 +52,10 @@ class NativeLiquidSolver : public RefCounted {
     std::vector<uint8_t> active, solid, vertical_wall;
     std::vector<int> liquid_id, liquid_cells;
     std::vector<int> marker_count;
+    std::vector<float> capillary_color;
+    std::vector<Vector3> capillary_normal;
+    std::vector<int> capillary_cells;
+    std::vector<uint8_t> capillary_mark;
     std::array<FaceGrid, 3> faces;
     std::vector<float> pressure, rhs, residual, direction, preconditioned, product;
     std::vector<int> diagonal;
@@ -263,6 +268,53 @@ class NativeLiquidSolver : public RefCounted {
         }
         return point;
     }
+    void add_surface_tension(float dt) {
+        for (int i : capillary_cells) { capillary_color[i] = 0; capillary_normal[i] = Vector3(); capillary_mark[i] = 0; }
+        capillary_cells.clear();
+        if (surface_tension <= 0) return;
+        // Continuum surface force: sigma * curvature * grad(colour) / rho.
+        // Smooth occupied cells before taking curvature; no spring links or
+        // increased bulk viscosity are used to make water stick together.
+        for (int cell : liquid_cells) {
+            int y = cell / plane, z = (cell % plane) / nx, x = cell % nx;
+            for (int dy = -2; dy <= 2; ++dy) for (int dz = -2; dz <= 2; ++dz) for (int dx = -2; dx <= 2; ++dx) {
+                if (x+dx <= 1 || x+dx >= nx-2 || y+dy <= 1 || y+dy >= ny-2 || z+dz <= 1 || z+dz >= nz-2) continue;
+                int i = index(x+dx,y+dy,z+dz);
+                if (!solid[i] && !capillary_mark[i]) { capillary_mark[i] = 1; capillary_cells.push_back(i); }
+            }
+        }
+        for (int i : capillary_cells) {
+            float total_colour = 0, total_weight = 0;
+            for (int dy=-1; dy<=1; ++dy) for (int dz=-1; dz<=1; ++dz) for (int dx=-1; dx<=1; ++dx) {
+                int j = i + dx + dz*nx + dy*plane;
+                float w = float((dx ? 1 : 2) * (dy ? 1 : 2) * (dz ? 1 : 2));
+                // Reflect at a solid instead of attracting water into it.
+                total_colour += w * (liquid_id[solid[j] ? i : j] >= 0 ? 1.f : 0.f); total_weight += w;
+            }
+            capillary_color[i] = total_colour / total_weight;
+        }
+        for (int i : capillary_cells) {
+            auto colour = [&](int j) { return capillary_color[solid[j] ? i : j]; };
+            Vector3 gradient(colour(i+1)-colour(i-1),colour(i+plane)-colour(i-plane),colour(i+nx)-colour(i-nx));
+            if (gradient.length_squared() > 1e-7f) capillary_normal[i] = -gradient.normalized();
+        }
+        auto curvature = [&](int i) {
+            if (!capillary_mark[i]) return 0.f;
+            auto n = [&](int j) { return capillary_normal[solid[j] ? i : j]; };
+            float k = (n(i+1).x-n(i-1).x+n(i+plane).y-n(i-plane).y+n(i+nx).z-n(i-nx).z)/(2*cell_size);
+            return clampf(k,-2/cell_size,2/cell_size);
+        };
+        for (int component=0; component<3; ++component) {
+            int offset = component==0 ? 1 : (component==1 ? plane : nx);
+            for (int i : faces[component].touched) {
+                int j=i-offset;
+                if (j<0 || solid[i] || solid[j]) continue;
+                float gradient=(capillary_color[i]-capillary_color[j])/cell_size;
+                float k=.5f*(curvature(i)+curvature(j));
+                faces[component].velocity[i] += dt * surface_tension / mass_density * k * gradient;
+            }
+        }
+    }
     void substep(float dt, Vector3 gravity) {
         clear_grid();
         for (int i = 0; i < count; ++i) if (active[i]) scatter(positions[i], velocities[i]);
@@ -282,6 +334,7 @@ class NativeLiquidSolver : public RefCounted {
                 }
             }
         }
+        add_surface_tension(dt);
         project_pressure(dt);
         // Extend the projected field into air; retain the old field for FLIP.
         for (int component = 0; component < 3; ++component) {
@@ -298,8 +351,10 @@ class NativeLiquidSolver : public RefCounted {
         }
         for (int i = 0; i < count; ++i) if (active[i]) {
             Vector3 previous = positions[i], pic = sample_velocity(previous);
-            Vector3 flip = velocities[i] + pic - sample_velocity(previous, true);
-            Vector3 velocity = limited(pic.lerp(flip, flip_ratio) * std::exp(-drag * dt), max_speed);
+            Vector3 flip = velocities[i] + pic - sample_velocity(previous,true);
+            // Bound unresolved velocity noise; coherent grid motion is kept.
+            Vector3 residual_velocity=limited(flip-pic,.40f);
+            Vector3 velocity=limited((pic+residual_velocity*flip_ratio)*std::exp(-drag*dt),max_speed);
             Vector3 midpoint = previous + sample_velocity(previous) * (.5f * dt);
             Vector3 candidate = previous + limited(sample_velocity(midpoint), max_speed) * dt;
             // Below grid resolution, detached spray travels ballistically.
@@ -324,22 +379,23 @@ class NativeLiquidSolver : public RefCounted {
             positions[i] = point; velocities[i] = velocity;
             if (point.y < base - .65f || !bounds.grow(.42f).has_point(Vector2(point.x, point.z))) { active[i] = 0; ++lost; }
         }
+
     }
 
-    // Sparse writes in a dense 3D colour field. Poly6 is normalised by parcel
-    // volume; mirrored samples complete support at the solid floor.
-    static constexpr int SX = 122, SZ = 188, SY = 68, SLICE = SX * SZ, TOTAL = SLICE * SY;
-    static constexpr float SURFACE_CELL = .06f, KERNEL = .10f, ISO = .5f;
-    const Vector3 surface_origin = Vector3(-3.6f, -1.38f, -5.6f);
+    // Sparse weighted-centroid surface reconstruction. Reflected samples
+    // complete support at solid contacts; the vertical grid follows each step.
+    static constexpr int SX = 122, SZ = 188, SY = 112, SLICE = SX * SZ, TOTAL = SLICE * SY;
+    static constexpr float SURFACE_CELL = .06f, SURFACE_Y = .035f, KERNEL = .11f, ISO = .5f;
+    const Vector3 surface_origin = Vector3(-3.6f, -1.4f, -5.6f);
     std::vector<float> surface_field, surface_floor;
     std::vector<Vector3> surface_gradient, surface_vertices, surface_normals;
     std::vector<uint8_t> surface_flags;
     std::vector<int> surface_touched, surface_cells;
     void splat_surface(Vector3 p, float weight) {
-        Vector3 c = (p - surface_origin) / SURFACE_CELL; float r2 = KERNEL * KERNEL;
+        Vector3 c = (p - surface_origin) / Vector3(SURFACE_CELL,SURFACE_Y,SURFACE_CELL); float r2 = KERNEL * KERNEL;
         const int offsets[8] = {0, -1, -SX, -SX - 1, -SLICE, -SLICE - 1, -SLICE - SX, -SLICE - SX - 1};
-        for (int y = std::max(1, int(std::floor(c.y)) - 2); y < std::min(SY - 1, int(std::ceil(c.y)) + 3); ++y) {
-            float wy = surface_origin.y + y * SURFACE_CELL, dy = wy - p.y;
+        for (int y = std::max(1, int(std::floor(c.y)) - 4); y < std::min(SY - 1, int(std::ceil(c.y)) + 5); ++y) {
+            float wy = surface_origin.y + y * SURFACE_Y, dy = wy - p.y;
             if (dy * dy >= r2) continue;
             for (int z = std::max(1, int(std::floor(c.z)) - 2); z < std::min(SZ - 1, int(std::ceil(c.z)) + 3); ++z) {
                 float dz = surface_origin.z + z * SURFACE_CELL - p.z, yz2 = dy * dy + dz * dz;
@@ -352,7 +408,7 @@ class NativeLiquidSolver : public RefCounted {
                     int i = y * SLICE + plane_index;
                     if (surface_field[i] == 0) surface_touched.push_back(i);
                     surface_field[i] += weight * q * q * q;
-                    surface_gradient[i] += Vector3(dx, dy, dz) * (-6 * weight * q * q / r2);
+                    surface_gradient[i] += p * (weight * q * q * q);
                     for (int offset : offsets) if (!surface_flags[i + offset]) { surface_flags[i + offset] = 1; surface_cells.push_back(i + offset); }
                 }
             }
@@ -361,7 +417,7 @@ class NativeLiquidSolver : public RefCounted {
     Vector3 surface_contact(Vector3 point) const {
         float height = floor_height(Vector2(point.x, point.z));
         if (!std::isfinite(height) || point.y >= height + .001f) return point;
-        if (height - point.y < SURFACE_CELL) { point.y = height + .001f; return point; }
+        if (height - point.y < SURFACE_Y) { point.y = height + .001f; return point; }
         if (point.y >= top) return point;
         Vector2 nearest(point.x, point.z); float best = 1e20f;
         for (size_t i = 0; i < floors.size(); ++i) if (elevations[i] < point.y + .001f) {
@@ -406,10 +462,17 @@ class NativeLiquidSolver : public RefCounted {
                 if (std::isfinite(floor) && p.y - floor < KERNEL) splat_surface(Vector3(image.x, 2 * floor - p.y, image.z), weight);
             }
         }
-        // Differentiate the clipped scalar field itself. The analytical kernel
-        // gradient has no floor/wall discontinuity and flips contact faces.
+        // Zhu-Bridson weighted-centroid reconstruction. A fixed colour
+        // threshold erases a stretched, shallow sheet; a local distance to
+        // neighbouring fluid markers keeps that sheet a coherent surface.
         for (int i : surface_touched) {
-            surface_gradient[i] = Vector3(surface_field[i + 1] - surface_field[i - 1], surface_field[i + SLICE] - surface_field[i - SLICE], surface_field[i + SX] - surface_field[i - SX]) / (2 * SURFACE_CELL);
+            Vector3 point=surface_origin+Vector3((i%SLICE)%SX*SURFACE_CELL,(i/SLICE)*SURFACE_Y,((i%SLICE)/SX)*SURFACE_CELL);
+            Vector3 mean=surface_gradient[i]/std::max(surface_field[i],1e-12f);
+            float distance=point.distance_to(mean);
+            surface_field[i]=clampf(.5f+(spacing*.90f-distance)/KERNEL,0,1);
+        }
+        for (int i : surface_touched) {
+            surface_gradient[i]=Vector3((surface_field[i+1]-surface_field[i-1])/(2*SURFACE_CELL),(surface_field[i+SLICE]-surface_field[i-SLICE])/(2*SURFACE_Y),(surface_field[i+SX]-surface_field[i-SX])/(2*SURFACE_CELL));
         }
         const int corners[8] = {0, 1, SX + 1, SX, SLICE, SLICE + 1, SLICE + SX + 1, SLICE + SX};
         const int tets[6][4] = {{0,5,1,6},{0,1,2,6},{0,2,3,6},{0,3,7,6},{0,7,4,6},{0,4,5,6}};
@@ -422,7 +485,7 @@ class NativeLiquidSolver : public RefCounted {
             if (!mask || mask == 255) continue;
             for (int k = 0; k < 8; ++k) {
                 int n = i + corners[k], slice = n % SLICE;
-                points[k] = surface_origin + Vector3(slice % SX, n / SLICE, slice / SX) * SURFACE_CELL;
+                points[k] = surface_origin + Vector3((slice % SX)*SURFACE_CELL,(n / SLICE)*SURFACE_Y,(slice / SX)*SURFACE_CELL);
                 normals[k] = -surface_gradient[n];
             }
             for (const auto &tet : tets) {
@@ -447,7 +510,7 @@ class NativeLiquidSolver : public RefCounted {
         const Vector3 droplet_axes[6] = {Vector3(1,0,0),Vector3(-1,0,0),Vector3(0,1,0),Vector3(0,-1,0),Vector3(0,0,1),Vector3(0,0,-1)};
         const int droplet_faces[8][3] = {{2,0,4},{2,4,1},{2,1,5},{2,5,0},{3,4,0},{3,1,4},{3,5,1},{3,0,5}};
         for (int i = 0; i < count; ++i) if (active[i]) {
-            Vector3 q = (positions[i] - surface_origin) / SURFACE_CELL;
+            Vector3 q = (positions[i] - surface_origin) / Vector3(SURFACE_CELL,SURFACE_Y,SURFACE_CELL);
             int x = int(std::round(q.x)), y = int(std::round(q.y)), z = int(std::round(q.z));
             if (x <= 0 || y <= 0 || z <= 0 || x >= SX-1 || y >= SY-1 || z >= SZ-1) continue;
             if (surface_field[y * SLICE + z * SX + x] >= ISO * .75f) continue;
@@ -487,6 +550,7 @@ public:
         bounds = cfg["bounds"]; reservoir = cfg.has("reservoir") ? Rect2(cfg["reservoir"]) : Rect2(cfg["spawn"]); goal = cfg["goal"];
         count = int(cfg["count"]); top = float(cfg["top"]); base = float(cfg["base"]); spacing = float(cfg["spacing"]); radius = float(cfg["radius"]);
         mass_density = float(cfg["rho"]); max_speed = float(cfg["max_speed"]); drag = float(cfg["drag"]); viscosity = float(cfg["viscosity"]);
+        surface_tension = cfg.has("surface_tension") ? float(cfg["surface_tension"]) : .072f;
         required = float(cfg["required"]); hold_seconds = float(cfg["hold"]);
         ERR_FAIL_COND(count < 1 || count > 32768 || spacing <= 0 || floors.empty());
         origin = Vector3(std::floor((bounds.position.x - .49f) / cell_size) * cell_size, std::floor((base - .7f) / cell_size) * cell_size, std::floor((bounds.position.y - .49f) / cell_size) * cell_size);
@@ -495,6 +559,7 @@ public:
         ny = int(std::ceil((top + 1.2f - origin.y) / cell_size)) + 2;
         plane = nx * nz; total = plane * ny;
         solid.assign(total, 1); vertical_wall.assign(total, 1); liquid_id.assign(total, -1); marker_count.assign(total, 0); liquid_cells.clear();
+        capillary_color.assign(total,0); capillary_normal.assign(total,Vector3()); capillary_mark.assign(total,0); capillary_cells.clear();
         for (int y = 1; y < ny - 1; ++y) for (int z = 1; z < nz - 1; ++z) for (int x = 1; x < nx - 1; ++x) {
             Vector3 p = origin + Vector3(x + .5f, y + .5f, z + .5f) * cell_size;
             bool roof = reservoir.has_point(Vector2(p.x,p.z)) && p.y >= top + .07f && p.y < top + .11f;

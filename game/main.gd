@@ -1,6 +1,6 @@
 extends Node3D
 
-enum Screen { MENU, READY, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, WON, FAILED }
+enum Screen { MENU, READY, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, FINISHING, WON, FAILED }
 const LEVEL: LevelDefinition = preload("res://resources/first_level.tres")
 const WATER: LiquidProfile = preload("res://resources/water.tres")
 const MAX_TILT: float = PI / 45.0 # Four degrees; purely visual, never a second gravity.
@@ -24,6 +24,10 @@ var opening: bool = false
 var _opening_remaining: float = 0.0
 var _paused_from: Screen = Screen.PLAYING
 const OPEN_SECONDS: float = 0.70
+const FINISH_SECONDS: float = 0.50
+var finish_remaining: float = 0.0
+var _camera_size: float = 8.35
+var _camera_offset: float = 0.0
 
 
 func _ready() -> void:
@@ -86,10 +90,11 @@ func _physics_process(delta: float) -> void:
 	if screen == Screen.PLAYING and opening:
 		_opening_remaining = maxf(0.0, _opening_remaining - delta)
 		board.set_reservoir_open_amount(1.0 - _opening_remaining / OPEN_SECONDS)
-		simulation.set_gate_opening(1.0 - _opening_remaining / OPEN_SECONDS)
+		simulation.set_gate_opening(minf((1.0 - _opening_remaining / OPEN_SECONDS) / 0.30, 1.0))
 		if _opening_remaining <= 0.0:
 			opening = false
 			hud.show_game(controls.use_touch or not controls.has_sensor)
+			_fit_camera()
 	if running:
 		simulation.step(delta, world_tilt)
 		_render_tick += 1
@@ -97,15 +102,21 @@ func _physics_process(delta: float) -> void:
 			surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
 		hud.field.active = not opening and (controls.use_touch or not controls.has_sensor)
 		if simulation.completed:
-			running = false
-			screen = Screen.WON
-			sounds.play_event(&"complete")
-			hud.show_win(simulation.goal_fraction)
+			_begin_finish()
+			return
 		elif simulation.is_unwinnable():
 			running = false
 			screen = Screen.FAILED
 			sounds.play_event(&"failure")
 			hud.show_failure()
+	if screen == Screen.FINISHING:
+		finish_remaining = maxf(0.0, finish_remaining - delta)
+		if finish_remaining <= 0.0:
+			screen = Screen.WON
+			hud.show_win(simulation.goal_fraction)
+	if screen != Screen.PAUSED:
+		camera.size = lerpf(camera.size, _camera_size, 1.0 - exp(-5.0 * delta))
+		camera.v_offset = lerpf(camera.v_offset, _camera_offset, 1.0 - exp(-5.0 * delta))
 	var target := Vector3.ZERO
 	if tilt_feedback and screen == Screen.PLAYING:
 		target = Vector3(world_tilt.y * MAX_TILT, 0.0, -world_tilt.x * MAX_TILT)
@@ -115,6 +126,25 @@ func _physics_process(delta: float) -> void:
 		_screenshot_frame -= 1
 		if _screenshot_frame == 0:
 			_capture.call_deferred()
+
+
+func _fit_camera() -> void:
+	var viewport_size := get_viewport().get_visible_rect().size
+	var preparing := screen == Screen.READY or opening
+	var reserved := 440.0 if preparing else 180.0
+	_camera_size = maxf(8.35, 10.4 * viewport_size.x / maxf(500.0, viewport_size.y - reserved))
+	_camera_offset = -80.0 * _camera_size / viewport_size.x if preparing else 0.0
+
+
+func _begin_finish() -> void:
+	running = false
+	screen = Screen.FINISHING
+	finish_remaining = FINISH_SECONDS
+	controls.touch = Vector2.ZERO
+	hud.show_game(false)
+	board.set_goal_complete(true)
+	surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
+	sounds.play_event(&"complete")
 
 
 func _start() -> void:
@@ -158,14 +188,19 @@ func _restart() -> void:
 	controls.touch = Vector2.ZERO
 	pivot.rotation = Vector3.ZERO
 	board.set_reservoir_open_amount(0.0)
+	board.set_goal_complete(false)
+	finish_remaining = 0.0
 	opening = false
 	running = false
 	screen = Screen.READY
+	_fit_camera()
+	camera.size = _camera_size
+	camera.v_offset = _camera_offset
 	hud.show_ready()
 
 
 func _pause() -> void:
-	if screen == Screen.PLAYING or screen == Screen.READY:
+	if screen in [Screen.PLAYING, Screen.READY, Screen.FINISHING]:
 		_paused_from = screen
 		running = false
 		screen = Screen.PAUSED
@@ -181,6 +216,7 @@ func _resume() -> void:
 	running = screen == Screen.PLAYING
 	if running and opening: hud.show_ready(true)
 	elif running: hud.show_game(controls.use_touch or not controls.has_sensor)
+	elif screen == Screen.FINISHING: hud.show_game(false)
 	else: hud.show_ready(opening)
 
 
@@ -227,7 +263,7 @@ func _set_language(code: String) -> void:
 
 func _back() -> void:
 	match screen:
-		Screen.PLAYING, Screen.READY: _pause()
+		Screen.PLAYING, Screen.READY, Screen.FINISHING: _pause()
 		Screen.PAUSED: _resume()
 		Screen.SETTINGS, Screen.LEVELS, Screen.ABOUT, Screen.WON, Screen.FAILED: _menu()
 
@@ -236,7 +272,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
 			_back()
-		elif event.keycode == KEY_R and (screen == Screen.PLAYING or screen == Screen.READY):
+		elif event.keycode == KEY_R and (screen in [Screen.PLAYING, Screen.READY, Screen.FINISHING]):
 			_restart()
 
 
@@ -291,12 +327,13 @@ func _setup_environment() -> void:
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
-	camera.size = 9.9
-	camera.position = Vector3(7, 20, 16)
+	camera.size = 8.35
+	camera.position = Vector3(2.8, 24, 14)
 	camera.far = 100.0
 	add_child(camera)
 	camera.look_at(Vector3(0, 0.2, 0))
 	camera.current = true
+	get_viewport().size_changed.connect(_fit_camera)
 
 
 func _save_settings() -> void:

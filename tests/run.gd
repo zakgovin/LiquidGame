@@ -35,6 +35,21 @@ func intact(fluid: LiquidSimulation) -> bool:
 	return remaining + fluid.lost_count == fluid.positions.size()
 
 
+func isolated_fraction(fluid: LiquidSimulation) -> float:
+	var bins := {}
+	for i: int in range(fluid.positions.size()):
+		if fluid.active[i] == 0: continue
+		var p := fluid.positions[i] / 0.07
+		var cell := Vector3i(floori(p.x), floori(p.y), floori(p.z))
+		bins[cell] = int(bins.get(cell, 0)) + 1
+	var isolated := 0
+	for cell: Vector3i in bins:
+		var nearby := 0
+		for offset: Vector3i in [Vector3i.ZERO, Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 1, 0), Vector3i(0, -1, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1)]: nearby += int(bins.get(cell + offset, 0))
+		if nearby < 4: isolated += int(bins[cell])
+	return float(isolated) / fluid.positions.size()
+
+
 func advance(fluid: LiquidSimulation, frames: int, tilt: Vector2) -> bool:
 	for frame: int in range(frames):
 		fluid.step(1.0 / 60.0, tilt)
@@ -139,6 +154,30 @@ func _run() -> void:
 		low = minf(low, vertices[i].y)
 		high = maxf(high, vertices[i].y)
 	check(finite_mesh and high - low > 0.08, "Rendered implicit surface has finite normals and actual vertical volume")
+	var mesh_volume := 0.0
+	for i: int in range(0, vertices.size(), 3): mesh_volume += vertices[i].dot(vertices[i + 1].cross(vertices[i + 2])) / 6.0
+	check(absf(absf(mesh_volume) - fluid.liquid_volume) < fluid.liquid_volume * 0.22, "Reconstructed resting surface approximates the represented physical volume")
+	var sheet_level := LEVEL.duplicate() as LevelDefinition
+	sheet_level.particle_count = 17 * 65
+	var sheet := LiquidSimulation.new(sheet_level, WATER)
+	for iz: int in range(65):
+		for ix: int in range(17): sheet.native_solver().call("set_particle_state", iz * 17 + ix, Vector3(-2.5 + ix * 0.075, LEVEL.elevation(0) + WATER.particle_radius, -2.4 + iz * 0.075), Vector3.ZERO)
+	var sheet_data: Dictionary = sheet.native_solver().call("build_surface")
+	var sheet_vertices: PackedVector3Array = sheet_data.vertices
+	var sheet_normals: PackedVector3Array = sheet_data.normals
+	var top_area := 0.0
+	for i: int in range(0, sheet_vertices.size(), 3):
+		if (sheet_normals[i] + sheet_normals[i + 1] + sheet_normals[i + 2]).y < 1.5: continue
+		top_area += absf((sheet_vertices[i + 1] - sheet_vertices[i]).cross(sheet_vertices[i + 2] - sheet_vertices[i]).y) * 0.5
+	print("Thin-sheet reconstructed top area: ", top_area, "; resting mesh volume: ", absf(mesh_volume))
+	check(top_area > 1.2 * 4.8 * 0.90, "A shallow stretched water sheet keeps at least 90% surface coverage instead of turning into dots")
+	fluid.reset()
+	var spray_fraction := 0.0
+	for phase: int in range(4):
+		advance(fluid, 120, Vector2.DOWN * 0.65)
+		spray_fraction = maxf(spray_fraction, isolated_fraction(fluid))
+	print("Gentle-flow maximum isolated fraction: ", spray_fraction)
+	check(spray_fraction < 0.01 and intact(fluid) and fluid.lost_count < LEVEL.particle_count * 0.01, "Gentle flow keeps over 99% of markers in connected neighborhoods and retains over 99% of its volume")
 	var input := TiltInput.new()
 	Input.set_gravity(Vector3(0, 0, 9.81))
 	input.calibrate()
@@ -172,6 +211,7 @@ func _run() -> void:
 	check(game.language_code == "en" and TranslationServer.get_locale() == "en", "Language choice survives a settings reload")
 	game.hud.buttons["language_ru"].pressed.emit()
 	check(game.hud.buttons["back"].text == "В главное меню", "Russian remains fully selectable")
+	check(game.hud.slider.find_parent("SensitivityGroup") != null and not game.hud.slider.find_parent("SensitivityGroup").is_ancestor_of(game.hud.buttons["mode_tilt"]), "Sensitivity and control mode belong to separate settings cards")
 	check(game.hud.slider.custom_minimum_size.y >= 96 and game.hud.feedback_toggle.custom_minimum_size.y >= 96, "Settings controls meet the 48 dp minimum touch target")
 	check(game.hud.buttons["back"].position.y == 32 and game.hud.buttons["back"].get_parent().offset_top == -168, "Main-menu navigation is anchored in the bottom bar")
 	game.hud.sound_toggle.button_pressed = false
@@ -220,8 +260,10 @@ func _run() -> void:
 	game._physics_process(0.5)
 	check(game.board.reservoir.get_child(0).position == gate_position and game.simulation.positions == opening_water, "Pause freezes both moving gate and water")
 	game._resume()
+	for frame: int in range(10): game._physics_process(1.0 / 60.0)
+	check(game.board.reservoir.get_child(0).position.distance_to(gate_position) > 0.3 and game.board.reservoir.get_child(0).rotation.length() > 0.1, "Outlet cover translates and tumbles away after release")
 	for frame: int in range(ceil(game.OPEN_SECONDS * 60) + 2): game._physics_process(1.0 / 60.0)
-	check(game.board.gate_open_amount >= 0.999 and game.running and not game.opening, "Gate retracts completely while its fixed machinery remains")
+	check(game.board.gate_open_amount >= 0.999 and game.running and not game.opening, "Released lid leaves the field while its collar remains")
 	check(game.running and game.hud.page == null and game.hud.buttons.size() == 1, "Gameplay contains only the scene, invisible input and pause button")
 	check(game.pivot.visible, "Play restores the visible 3D level")
 	game.controls.touch = Vector2.RIGHT
@@ -261,6 +303,23 @@ func _run() -> void:
 	game._notification(MainLoop.NOTIFICATION_APPLICATION_FOCUS_OUT)
 	check(game.screen == game.Screen.MENU, "Backgrounding the main menu does not create a pause dialog")
 	game._start()
+	release_water(game)
+	game._begin_finish()
+	check(game.screen == game.Screen.FINISHING and game.hud.page == null and not game.hud.field.active, "Delivery leaves the vessel visible before showing completion")
+	for frame: int in range(15): game._physics_process(1.0 / 60.0)
+	check(game.screen == game.Screen.FINISHING, "Completion modal stays hidden for the first quarter second")
+	game._pause()
+	var finish_wait: float = game.finish_remaining
+	game._physics_process(1.0)
+	check(is_equal_approx(game.finish_remaining, finish_wait), "Pausing freezes the completion delay")
+	game._resume()
+	check(game.screen == game.Screen.FINISHING and not game.running, "Continue restores the pending result without restarting physics")
+	for frame: int in range(14): game._physics_process(1.0 / 60.0)
+	check(game.screen == game.Screen.FINISHING, "Result remains visible until the full half second has elapsed")
+	for frame: int in range(2): game._physics_process(1.0 / 60.0)
+	check(game.screen == game.Screen.WON and game.hud.buttons.has("win_menu"), "Completion modal opens after half a second of foreground time")
+	game._restart()
+	check(game.finish_remaining == 0 and game.board.gate_open_amount == 0, "Restart clears a pending result and returns the cover")
 	release_water(game)
 	for i: int in range(floori(LEVEL.particle_count * (1.0 - LEVEL.required_fraction)) + 1): game.simulation.set_particle(i, Vector3(4.5, -2, 0), Vector3.ZERO)
 	game._physics_process(1.0 / 60.0)

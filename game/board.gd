@@ -6,21 +6,17 @@ extends Node3D
 var _steel := _material(Color("617b8a"), 0.65)
 var _base := _material(Color("a7bac5"), 0.9)
 var _rim := _material(Color("789eaf"), 0.65)
-var _step := _material(Color("d58a52"), 0.85)
+var _step := ShaderMaterial.new()
 var _red := _material(Color("ec5448"), 0.6)
-var _glass: StandardMaterial3D
+var _glass: ShaderMaterial
 var reservoir: Node3D
 var gate_open_amount: float = 0.0
 var _gate: Node3D
-var _piston: MeshInstance3D
+var _lid_closed: Vector3
 var _status: MeshInstance3D
 var _closed_light: StandardMaterial3D
 var _open_light: StandardMaterial3D
-var _gate_base: float
-var _gate_stroke: float
-var _piston_top: float
-var _piston_x: float
-var _piston_z: float
+var hazard_edges: Array[MeshInstance3D] = []
 var _batches: Dictionary = {}
 
 
@@ -31,22 +27,20 @@ static func _material(color: Color, roughness: float) -> StandardMaterial3D:
 	return result
 
 
-func _glass_material(alpha: float) -> StandardMaterial3D:
-	var material := _material(Color(0.63, 0.81, 0.89, alpha), 0.24)
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+func _glass_material(alpha: float) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = preload("res://assets/materials/glass.gdshader")
+	material.set_shader_parameter("face_opacity", alpha)
 	material.render_priority = 2
 	return material
 
 
 func build(level: LevelDefinition) -> void:
-	_glass = _glass_material(0.07)
-	_step.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_glass = _glass_material(0.22)
+	_step.shader = preload("res://assets/materials/hazard.gdshader")
 	var floors: Array[Material] = []
 	for i: int in range(level.floor_regions.size()):
-		floors.append(_material(Color("d7e6ea").lerp(Color("97bdce"), float(i) / 5.0), 0.85))
+		floors.append(_material(Color("e1e7e5").lerp(Color("b5c3c2"), float(i) / 5.0), 0.85))
 	for tile: Dictionary in level.terrain_tiles():
 		var r: Rect2 = tile.bounds
 		var y: float = tile.height
@@ -69,9 +63,10 @@ func build(level: LevelDefinition) -> void:
 		if level.floor_height(midpoint + normal * 0.002) > level.floor_height(midpoint - normal * 0.002): normal = -normal
 		var step := high < level.board_top - 0.001
 		_quad(Vector3(a.x, low, a.y), Vector3(b.x, low, b.y), Vector3(b.x, high, b.y), Vector3(a.x, high, a.y), Vector3(normal.x, 0, normal.y), _step if step else _glass)
-		var cap := _box(Vector3(a.distance_to(b), 0.016, 0.022), Vector3(midpoint.x, high + 0.009, midpoint.y), _step if step else _rim)
+		var cap := _box(Vector3(a.distance_to(b), 0.025 if step else 0.04, 0.12 if step else 0.055), Vector3(midpoint.x, high + 0.009, midpoint.y), _step if step else _rim)
 		cap.rotation.y = -atan2(b.y - a.y, b.x - a.x)
 		cap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if step: hazard_edges.append(cap)
 	_finish_mesh()
 	var goal := level.goal
 	var top := level.board_top + 0.026
@@ -114,48 +109,49 @@ func _build_reservoir(level: LevelDefinition) -> void:
 	var front := r.end.y
 	var center_x := r.get_center().x
 	var port_top := floor_y + 0.35
-	_gate_stroke = port_top - floor_y + 0.05
-	_gate_base = (port_top + floor_y) * 0.5
 	_gate = Node3D.new()
-	_gate.position = Vector3(center_x, _gate_base, front)
+	_gate.name = "ReleaseLid"
+	_lid_closed = Vector3(center_x, (port_top + floor_y) * 0.5, front + 0.025)
+	_gate.position = _lid_closed
 	reservoir.add_child(_gate)
-	# A glazed sluice plate moves on two fixed guides into the upper housing.
-	_box(Vector3(r.size.x - 0.06, port_top - floor_y, 0.045), Vector3.ZERO, _glass_material(0.20), _gate)
+	# A sealed removable outlet cover is kicked clear, then tumbles away.
+	_box(Vector3(r.size.x - 0.06, port_top - floor_y, 0.07), Vector3.ZERO, _glass_material(0.30), _gate)
 	for x: float in [-r.size.x * 0.5, r.size.x * 0.5]:
-		_box(Vector3(0.05, port_top - floor_y, 0.07), Vector3(x, 0, 0.015), _steel, _gate)
+		_box(Vector3(0.06, port_top - floor_y + 0.06, 0.10), Vector3(x, 0, 0.01), _steel, _gate)
 	for y: float in [-(port_top - floor_y) * 0.5, (port_top - floor_y) * 0.5]:
-		_box(Vector3(r.size.x + 0.04, 0.055, 0.07), Vector3(0, y, 0.02), _steel, _gate)
-		for x: float in [-r.size.x * 0.44, r.size.x * 0.44]:
-			var bolt := _cylinder(0.022, 0.018, Vector3(x, y, 0.063), _base, _gate)
+		_box(Vector3(r.size.x + 0.06, 0.06, 0.10), Vector3(0, y, 0.015), _steel, _gate)
+		for x: float in [-r.size.x * 0.43, r.size.x * 0.43]:
+			var bolt := _cylinder(0.026, 0.022, Vector3(x, y, 0.08), _base, _gate)
 			bolt.rotation.x = PI * 0.5
-	for x: float in [r.position.x - 0.06, r.end.x + 0.06]:
-		_box(Vector3(0.08, _gate_stroke * 2 + 0.1, 0.10), Vector3(x, floor_y + _gate_stroke, front + 0.025), _steel, reservoir)
+	# The fixed collar and two clamps make the sealed opening readable.
+	for x: float in [r.position.x - 0.055, r.end.x + 0.055]:
+		_box(Vector3(0.075, port_top - floor_y + 0.17, 0.12), Vector3(x, (port_top + floor_y) * 0.5, front), _rim, reservoir)
+		_box(Vector3(0.14, 0.11, 0.14), Vector3(x, port_top - 0.04, front + 0.045), _steel, reservoir)
+	_box(Vector3(r.size.x + 0.12, 0.06, 0.12), Vector3(center_x, port_top + 0.045, front), _steel, reservoir)
 	_box(Vector3(r.size.x, roof - port_top, 0.045), Vector3(center_x, (roof + port_top) * 0.5, front), _glass, reservoir)
 	_box(Vector3(r.size.x, 0.04, r.size.y), Vector3(center_x, roof + 0.02, r.get_center().y), _glass, reservoir)
 	for x: float in [r.position.x, r.end.x]:
-		_box(Vector3(0.035, 0.04, r.size.y), Vector3(x, roof + 0.03, r.get_center().y), _rim, reservoir)
-	_box(Vector3(r.size.x + 0.18, _gate_stroke + 0.16, 0.24), Vector3(center_x, port_top + _gate_stroke * 0.5 + 0.09, front + 0.04), _steel, reservoir)
-	_piston_top = port_top + _gate_stroke + 0.20
-	_piston_x = center_x
-	_piston_z = front + 0.20
-	_cylinder(0.10, 0.32, Vector3(center_x, _piston_top + 0.12, _piston_z), _steel, reservoir)
-	_piston = _cylinder(0.036, 1.0, Vector3.ZERO, _base, reservoir)
+		_box(Vector3(0.045, 0.04, r.size.y), Vector3(x, roof + 0.03, r.get_center().y), _rim, reservoir)
 	_closed_light = _material(Color("dba45d"), 0.35)
 	_open_light = _material(Color("48b8b0"), 0.35)
-	_status = _box(Vector3(0.09, 0.05, 0.03), Vector3(r.end.x - 0.10, port_top + _gate_stroke + 0.07, front + 0.17), _closed_light, reservoir)
+	_status = _box(Vector3(0.09, 0.045, 0.03), Vector3(r.end.x - 0.12, port_top + 0.047, front + 0.075), _closed_light, reservoir)
 	set_reservoir_open_amount(0)
 
 
 func set_reservoir_open_amount(amount: float) -> void:
 	gate_open_amount = clampf(amount, 0.0, 1.0)
-	var eased := gate_open_amount * gate_open_amount * (3.0 - 2.0 * gate_open_amount)
-	_gate.position.y = _gate_base + eased * _gate_stroke
+	var kick := smoothstep(0.0, 0.30, gate_open_amount)
+	var flight := smoothstep(0.12, 1.0, gate_open_amount)
+	_gate.position = _lid_closed + Vector3(-4.8 * flight, 2.2 * flight - 0.4 * flight * flight, 0.28 * kick + 0.5 * flight)
+	_gate.rotation = Vector3(-2.8 * flight, 1.8 * flight, -2.1 * flight)
 	_gate.visible = gate_open_amount < 0.999
-	var rod_bottom := _gate.position.y + _gate_stroke * 0.5
-	var length := maxf(0.05, _piston_top - rod_bottom)
-	_piston.position = Vector3(_piston_x, (rod_bottom + _piston_top) * 0.5, _piston_z)
-	_piston.scale.y = length
-	_status.material_override = _open_light if gate_open_amount >= 0.999 else _closed_light
+	_status.material_override = _open_light if gate_open_amount >= 0.30 else _closed_light
+
+
+func set_goal_complete(complete: bool) -> void:
+	_red.albedo_color = Color("42bcb0") if complete else Color("ec5448")
+	_red.emission_enabled = complete
+	_red.emission = Color("197c71") if complete else Color.BLACK
 
 
 func _box(size: Vector3, center: Vector3, material: Material, parent: Node = self) -> MeshInstance3D:

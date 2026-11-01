@@ -31,7 +31,7 @@ func _init(definition: LevelDefinition, profile: LiquidProfile) -> void:
 		"count": level.particle_count, "top": level.board_top, "base": level.base_height,
 		"radius": material.particle_radius, "spacing": material.particle_spacing,
 		"rho": material.rest_density, "drag": material.drag, "max_speed": material.max_speed,
-		"viscosity": material.viscosity, "required": level.required_fraction, "hold": level.hold_seconds})
+		"viscosity": material.viscosity, "surface_tension": material.surface_tension, "required": level.required_fraction, "hold": level.hold_seconds})
 	_sync_native()
 
 

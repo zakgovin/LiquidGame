@@ -200,12 +200,15 @@ func show_settings(sensitivity: float, use_touch: bool, feedback: bool, sensor: 
 	_text(tr("CONTROLS"), controls_group, 32, true, INK)
 	_segments([tr("MODE_TILT"), tr("MODE_TOUCH")], ["mode_tilt", "mode_touch"], 1 if use_touch else 0, controls_group, func(choice: int): mode_changed.emit(choice == 1))
 	if not sensor: _text(tr("NO_SENSOR"), controls_group, 24)
+	var sensitivity_group := _settings_card(content)
+	sensitivity_group.name = "SensitivityGroup"
 	var value_row := HBoxContainer.new()
-	controls_group.add_child(value_row)
-	var caption := _text(tr("SENSITIVITY"), value_row, 28, false, INK)
+	sensitivity_group.add_child(value_row)
+	var caption := _text(tr("SENSITIVITY"), value_row, 32, true, INK)
 	caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var amount := _text("×%.1f" % sensitivity, value_row, 28, true, PRIMARY)
 	amount.custom_minimum_size.x = 84
+	amount.size_flags_horizontal = Control.SIZE_SHRINK_END
 	amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	slider = HSlider.new()
 	slider.custom_minimum_size.y = 96
@@ -232,15 +235,15 @@ func show_settings(sensitivity: float, use_touch: bool, feedback: bool, sensor: 
 	var padding := MarginContainer.new()
 	padding.add_theme_constant_override("margin_left", 20)
 	padding.add_theme_constant_override("margin_right", 20)
-	controls_group.add_child(padding)
+	sensitivity_group.add_child(padding)
 	padding.add_child(slider)
 	var limits := HBoxContainer.new()
-	controls_group.add_child(limits)
+	sensitivity_group.add_child(limits)
 	_text(tr("SOFTER"), limits, 24)
 	var faster := _text(tr("FASTER"), limits, 24)
 	faster.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	faster.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_text(tr("CONTROL_HELP"), controls_group, 24)
+	_text(tr("CONTROL_HELP"), sensitivity_group, 24)
 	var feedback_group := _settings_card(content)
 	_text(tr("FEEDBACK"), feedback_group, 32, true, INK)
 	feedback_toggle = _switch(tr("TILT_FEEDBACK"), tr("TILT_DESCRIPTION"), feedback, feedback_group)
