@@ -2,7 +2,6 @@ class_name HydrologicHUD
 extends Control
 
 signal start_requested
-signal release_requested
 signal pause_requested
 signal restart_requested
 signal resume_requested
@@ -36,6 +35,7 @@ var slider: HSlider
 var feedback_toggle: CheckButton
 var sound_toggle: CheckButton
 var settings_scroll: ScrollContainer
+var source_hint: PanelContainer
 
 
 func _ready() -> void:
@@ -70,6 +70,7 @@ func _clear_page() -> void:
 		page.hide()
 		page.queue_free()
 	page = null
+	source_hint = null
 	brand = null
 	_frames.clear()
 	buttons.clear()
@@ -120,35 +121,34 @@ func show_game(rotation_enabled: bool) -> void:
 	_clear_page()
 	pause_button.show()
 	field.active = rotation_enabled
+	field.rotation_enabled = rotation_enabled
 
 
 func show_ready(opening: bool = false, rotate: bool = false) -> void:
 	show_game(rotate and not opening)
+	field.active = not opening
 	page = Control.new()
 	page.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	page.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(page)
-	var card := PanelContainer.new()
-	card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	card.offset_left = 32
-	card.offset_right = -32
-	card.offset_top = -266
-	card.offset_bottom = -32
-	var style := _style(Color(0.98, 0.99, 0.99, 0.96), 24)
-	style.content_margin_left = 24
-	style.content_margin_right = 24
-	style.content_margin_top = 16
-	style.content_margin_bottom = 20
-	card.add_theme_stylebox_override("panel", style)
-	page.add_child(card)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 14)
-	card.add_child(column)
-	var caption := _text(tr("READY_ROTATE_HINT") if rotate else tr("READY_HINT"), column, 26)
+	if opening: return
+	source_hint = PanelContainer.new()
+	source_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	source_hint.add_theme_stylebox_override("panel", _style(Color(0.98, 0.99, 0.99, 0.92), 16))
+	page.add_child(source_hint)
+	var caption := Label.new()
+	caption.text = tr("TAP_RESERVOIR")
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var release := _button(tr("OPENING") if opening else tr("RELEASE_WATER"), Rect2(0, 0, 0, 104), true, func(): release_requested.emit(), column, "release")
-	release.custom_minimum_size.y = 104
-	release.disabled = opening
+	caption.add_theme_color_override("font_color", INK)
+	caption.add_theme_font_size_override("font_size", 24)
+	caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	source_hint.add_child(caption)
+	source_hint.reset_size()
+
+
+func position_source_hint(point: Vector2) -> void:
+	if not is_instance_valid(source_hint): return
+	source_hint.position = Vector2(clampf(point.x - source_hint.size.x * 0.5, 24.0, size.x - source_hint.size.x - 24.0), maxf(24.0, point.y - source_hint.size.y - 18.0))
 
 
 func _page_header(title: String) -> VBoxContainer:
@@ -359,11 +359,12 @@ func show_pause() -> void:
 	_button(tr("MAIN_MENU"), Rect2(96, 764, 528, 104), false, func(): menu_requested.emit(), frame, "exit")
 
 
-func show_win(fraction: float) -> void:
+func show_win(delivered: int, total: int, lost: int) -> void:
 	field.active = false
 	field.reset()
 	var frame := _modal_card(tr("WIN_TITLE"), 500)
-	_center_label(tr("WIN_VOLUME") % floori(fraction * 100.0), 490, 28, MUTED, false, frame)
+	_center_label(tr("WIN_VOLUME") % (100.0 * delivered / total), 472, 28, MUTED, false, frame)
+	_center_label(tr("WIN_BALANCE") % [100.0 * (total - delivered - lost) / total, 100.0 * lost / total], 518, 22, MUTED, false, frame)
 	_button(tr("REPLAY"), Rect2(96, 574, 528, 104), true, func(): restart_requested.emit(), frame, "replay")
 	_button(tr("MAIN_MENU"), Rect2(96, 702, 528, 104), false, func(): menu_requested.emit(), frame, "win_menu")
 

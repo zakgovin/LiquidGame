@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.7.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.8.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "ГИДРОЛОГИКА"
@@ -119,7 +119,7 @@ msgid "WIN_TITLE"
 msgstr "Уровень пройден"
 
 msgid "WIN_VOLUME"
-msgstr "В сосуде %d%% воды"
+msgstr "В сосуде %.1f%% воды"
 
 msgid "FAIL_TITLE"
 msgstr "Вода расплескалась"
@@ -141,3 +141,9 @@ msgstr "Чувствительность меняет скорость вращ�
 
 msgid "TILT_ONLY"
 msgstr "Доступно в режиме «Наклон»"
+
+msgid "TAP_RESERVOIR"
+msgstr "Нажмите на резервуар ↓"
+
+msgid "WIN_BALANCE"
+msgstr "На уровне %.1f%% · Потеряно %.1f%%"

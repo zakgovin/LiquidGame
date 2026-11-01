@@ -36,20 +36,23 @@ class NativeLiquidSolver : public RefCounted {
     std::vector<float> elevations;
     std::vector<Tile> tiles;
     std::vector<std::array<float, 6>> walls;
+    std::vector<Vector3> wall_normals;
     Rect2 bounds, reservoir, goal;
     float top = 1.05f, base = -.56f, spacing = .038f, radius = .017f;
     float cell_size = .07f, mass_density = 1000, viscosity = .000001f;
     float drag = .015f, max_speed = 3, flip_ratio = .95f;
     float surface_tension = .072f;
-    float required = .8f, hold_seconds = .75f, fraction = 0, held = 0;
+    float required = .8f, hold_seconds = .75f, fraction = 0, held = 0, flow_speed = 1.15f;
     float maximum_divergence = 0, liquid_volume = 0;
-    int count = 0, lost = 0, nx = 0, ny = 0, nz = 0, plane = 0, total = 0;
+    int count = 0, lost = 0, delivered = 0, lost_without_rim = 0, nx = 0, ny = 0, nz = 0, plane = 0, total = 0;
     int pressure_steps = 0;
     bool completed = false, reservoir_open = false, gate_controlled = false;
     float gate_fraction = 0, gate_lower = .42f;
     std::vector<int> gate_cells;
     Vector3 origin;
     std::vector<Vector3> positions, velocities;
+    std::vector<Vector3> spill_points;
+    std::vector<uint8_t> over_rim, escaped;
     std::vector<uint8_t> active, solid, vertical_wall;
     std::vector<int> liquid_id, liquid_cells;
     std::vector<int> marker_count;
@@ -246,13 +249,27 @@ class NativeLiquidSolver : public RefCounted {
         return point + best;
     }
     Vector3 constrain(Vector3 point, Vector3 previous) const {
+        // Sweep the exposed faces before resolving rounded contacts. A
+        // single nearest-face projection on adjacent solid tiles can push a
+        // parcel through their hidden shared seam at an inside corner.
+        for (size_t i = 0; i < walls.size(); ++i) {
+            const auto &wall = walls[i]; Vector3 normal = wall_normals[i];
+            Vector3 anchor(wall[0],0,wall[1]);
+            float before = (previous-anchor).dot(normal), after = (point-anchor).dot(normal);
+            if (before < radius - .0001f || after >= radius || before <= after) continue;
+            float t = clampf((before-radius)/(before-after),0,1);
+            Vector3 hit = previous.lerp(point,t);
+            if (hit.y <= wall[4] || hit.y >= wall[5]) continue;
+            bool on_face = normal.x != 0 ? hit.z >= wall[1]-.0001f && hit.z <= wall[3]+.0001f : hit.x >= wall[0]-.0001f && hit.x <= wall[2]+.0001f;
+            if (on_face) point += normal * (radius-after);
+        }
         Vector2 xz(point.x, point.z);
         float floor = floor_height(xz);
         if (std::isfinite(floor) && point.y < floor + radius && previous.y >= floor + radius - .0001f) point.y = floor + radius;
         Vector3 q = (point - origin) / cell_size;
         int x = int(std::floor(q.x)), y = int(std::floor(q.y)), z = int(std::floor(q.z));
         bool needs_walls = in_grid(x, y, z) && vertical_wall[index(x, y, z)];
-        if (needs_walls) for (const auto &tile : tiles) {
+        if (needs_walls) for (int pass = 0; pass < 2; ++pass) for (const auto &tile : tiles) {
             const Rect2 &r = tile.rectangle;
             if (point.y >= tile.height + radius || point.y < base - radius || !r.grow(radius).has_point(Vector2(point.x, point.z))) continue;
             point = collide_box(point, Vector3(r.position.x, base, r.position.y), Vector3(r.get_end().x, tile.height, r.get_end().y), radius);
@@ -378,7 +395,18 @@ class NativeLiquidSolver : public RefCounted {
             if (contact.y * velocity.y > 0) velocity.y = 0;
             if (contact.z * velocity.z > 0) velocity.z = 0;
             positions[i] = point; velocities[i] = velocity;
-            if (point.y < base - .65f || !bounds.grow(.42f).has_point(Vector2(point.x, point.z))) { active[i] = 0; ++lost; }
+            if (std::max({previous.y, candidate.y, point.y}) >= top - radius) over_rim[i] = 1;
+            if (!escaped[i] && !bounds.has_point(Vector2(point.x, point.z))) {
+                escaped[i] = 1;
+                // Group nearby markers into a few visible spill cues.
+                bool nearby = false;
+                for (auto p : spill_points) if (p.distance_squared_to(point) < .16f) nearby = true;
+                if (!nearby && spill_points.size() < 8) spill_points.push_back(point);
+            }
+            if (point.y < base - .65f || !bounds.grow(.42f).has_point(Vector2(point.x, point.z))) {
+                active[i] = 0; ++lost;
+                if (!over_rim[i]) ++lost_without_rim;
+            }
         }
 
     }
@@ -544,6 +572,7 @@ protected:
         ClassDB::bind_method(D_METHOD("configure", "configuration"), &NativeLiquidSolver::configure);
         ClassDB::bind_method(D_METHOD("reset"), &NativeLiquidSolver::reset);
         ClassDB::bind_method(D_METHOD("step", "delta", "tilt"), &NativeLiquidSolver::step);
+        ClassDB::bind_method(D_METHOD("settle", "delta", "tilt"), &NativeLiquidSolver::settle);
         ClassDB::bind_method(D_METHOD("set_gate_opening", "amount"), &NativeLiquidSolver::set_gate_opening);
         ClassDB::bind_method(D_METHOD("get_state"), &NativeLiquidSolver::get_state);
         ClassDB::bind_method(D_METHOD("build_surface"), &NativeLiquidSolver::build_surface);
@@ -559,9 +588,18 @@ public:
         for (int i = 0; i < ws.size(); ++i) { PackedFloat32Array w = ws[i]; std::array<float,6> a{}; for (int j = 0; j < 6; ++j) a[j] = w[j]; walls.push_back(a); }
         bounds = cfg["bounds"]; reservoir = cfg.has("reservoir") ? Rect2(cfg["reservoir"]) : Rect2(cfg["spawn"]); goal = cfg["goal"];
         count = int(cfg["count"]); top = float(cfg["top"]); base = float(cfg["base"]); spacing = float(cfg["spacing"]); radius = float(cfg["radius"]);
+        wall_normals.clear();
+        for (const auto &wall : walls) {
+            Vector2 midpoint((wall[0]+wall[2])*.5f,(wall[1]+wall[3])*.5f);
+            bool x_face = std::abs(wall[0]-wall[2]) < .0001f;
+            Vector2 axis = x_face ? Vector2(1,0) : Vector2(0,1);
+            float sign = floor_height(midpoint+axis*.001f) < floor_height(midpoint-axis*.001f) ? 1.f : -1.f;
+            wall_normals.push_back(Vector3(axis.x*sign,0,axis.y*sign));
+        }
         mass_density = float(cfg["rho"]); max_speed = float(cfg["max_speed"]); drag = float(cfg["drag"]); viscosity = float(cfg["viscosity"]);
         surface_tension = cfg.has("surface_tension") ? float(cfg["surface_tension"]) : .072f;
         required = float(cfg["required"]); hold_seconds = float(cfg["hold"]);
+        flow_speed = cfg.has("flow_speed") ? clampf(float(cfg["flow_speed"]), .5f, 1.5f) : 1.15f;
         ERR_FAIL_COND(count < 1 || count > 32768 || spacing <= 0 || floors.empty());
         origin = Vector3(std::floor((bounds.position.x - .49f) / cell_size) * cell_size, std::floor((base - .7f) / cell_size) * cell_size, std::floor((bounds.position.y - .49f) / cell_size) * cell_size);
         nx = int(std::ceil((bounds.get_end().x + .49f - origin.x) / cell_size)) + 2;
@@ -592,6 +630,7 @@ public:
     }
     void reset() {
         clear_grid(); positions.resize(count); velocities.assign(count,Vector3()); active.assign(count,1);
+        over_rim.assign(count,0); escaped.assign(count,0); spill_points.clear();
         Rect2 water = reservoir.grow(-radius - .002f);
         int columns = std::max(1,int(std::round(water.size.x / spacing))), rows = std::max(1,int(std::round(water.size.y / spacing)));
         int layers = std::max(1,int(std::ceil(float(count) / (columns * rows)))), slots = columns * rows * layers;
@@ -603,24 +642,39 @@ public:
             positions[i] = Vector3(px,py,pz);
         }
         set_gate_opening(0); gate_controlled = false;
-        fraction = held = 0; lost = 0; completed = false; reservoir_open = false; maximum_divergence = 0; pressure_steps = 0;
+        fraction = held = 0; lost = delivered = lost_without_rim = 0; completed = false; reservoir_open = false; maximum_divergence = 0; pressure_steps = 0;
         liquid_volume = count * spacing * spacing * spacing;
     }
     void step(double delta, Vector2 tilt) {
         if (completed || count < 1 || delta <= 0) return;
+        advance(delta, tilt);
+    }
+    void settle(double delta, Vector2 tilt) {
+        if (count < 1 || delta <= 0) return;
+        advance(delta, tilt);
+    }
+    void advance(double delta, Vector2 tilt) {
         if (!gate_controlled) set_gate_opening(1);
-        float duration = float(std::min(delta, 1. / 30.));
+        float elapsed = float(std::min(delta, 1. / 30.));
+        float duration = elapsed * flow_speed;
         tilt = tilt.length_squared() > 1 ? tilt.normalized() : tilt;
         Vector3 gravity = Vector3(tilt.x * .60f, -1, tilt.y * .60f).normalized() * 9.81f;
-        int steps = std::max(1,int(std::ceil(duration * 60.f - 1e-5f)));
+        // Scale gameplay time without adding gravity or kinetic energy.
+        // Keep each advection step below one grid cell at maximum speed.
+        float maximum_dt = std::min(.02f, .90f * cell_size / max_speed);
+        int steps = std::max(1,int(std::ceil(duration / maximum_dt - 1e-5f)));
         float dt = duration / steps;
+        spill_points.clear();
         for (int i = 0; i < steps; ++i) substep(dt,gravity);
-        int delivered = 0;
+        delivered = 0;
         for (int i = 0; i < count; ++i) if (active[i]) {
             auto p = positions[i]; Vector2 xz(p.x,p.z);
-            if (goal.has_point(xz) && p.y < floor_height(xz) + .34f) ++delivered;
+            // The vessel is its full physical footprint up to the real rim.
+            // A shallow arbitrary height cutoff loses captured water when
+            // gravity piles it against the wall.
+            if (goal.has_point(xz) && p.y >= floor_height(xz) && p.y < top) ++delivered;
         }
-        fraction = float(delivered) / count; held = fraction >= required ? held + duration : 0; completed = held >= hold_seconds;
+        fraction = float(delivered) / count; held = fraction >= required ? held + elapsed : 0; completed = held >= hold_seconds;
         liquid_volume = (count - lost) * spacing * spacing * spacing;
     }
     void set_gate_opening(double amount) {
@@ -642,6 +696,10 @@ public:
         PackedVector3Array p,v; PackedByteArray a; p.resize(count); v.resize(count); a.resize(count);
         if (count) { std::copy(positions.begin(),positions.end(),p.ptrw()); std::copy(velocities.begin(),velocities.end(),v.ptrw()); std::copy(active.begin(),active.end(),a.ptrw()); }
         Dictionary d; d["positions"] = p; d["velocities"] = v; d["active"] = a; d["lost"] = lost;
+        d["delivered"] = delivered; d["remaining"] = count - lost - delivered; d["lost_without_rim"] = lost_without_rim;
+        PackedVector3Array spills;
+        for (auto point : spill_points) spills.push_back(point);
+        d["spills"] = spills;
         d["fraction"] = fraction; d["held"] = held; d["completed"] = completed;
         d["divergence"] = maximum_divergence; d["cells"] = int(liquid_cells.size()); d["pressure_steps"] = pressure_steps; d["volume"] = liquid_volume;
         return d;

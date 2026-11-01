@@ -32,7 +32,7 @@ func intact(fluid: LiquidSimulation) -> bool:
 	for i: int in range(fluid.positions.size()):
 		if not fluid.positions[i].is_finite() or not fluid.velocities[i].is_finite(): return false
 		if fluid.active[i] != 0: remaining += 1
-	return remaining + fluid.lost_count == fluid.positions.size()
+	return remaining + fluid.lost_count == fluid.positions.size() and fluid.delivered_count + fluid.remaining_count + fluid.lost_count == fluid.positions.size()
 
 
 func isolated_fraction(fluid: LiquidSimulation) -> float:
@@ -89,6 +89,11 @@ func _run() -> void:
 	var before := center(fluid.positions)
 	check(advance(fluid, 60, Vector2.DOWN), "One-second tilt stays finite and conserves accounted mass")
 	check(center(fluid.positions).z > before.z + 0.8, "Low-viscosity flow moves promptly through the channel")
+	var previous_pace := LEVEL.duplicate() as LevelDefinition
+	previous_pace.flow_speed = 1.0
+	var slower := LiquidSimulation.new(previous_pace, WATER)
+	advance(slower, 60, Vector2.DOWN)
+	check(center(fluid.positions).z > center(slower.positions).z + 0.12, "The faster flow advances farther in equal real time without increasing gravity")
 	before = center(fluid.positions)
 	check(advance(fluid, 120, Vector2.UP), "Water tolerates a sharp reversal")
 	check(center(fluid.positions).z < before.z - 0.3, "The flow reverses with gravity")
@@ -103,7 +108,10 @@ func _run() -> void:
 	check(fluid.completed and fluid.goal_fraction >= 0.8, "Full 360-degree circuit holds at least 80% in the central vessel")
 	var old := fluid.positions.duplicate()
 	fluid.step(1.0 / 60.0, Vector2.UP)
-	check(old == fluid.positions, "Victory freezes the completed simulation")
+	check(old == fluid.positions, "Normal steps freeze a completed simulation until its explicit settling phase")
+	fluid.settle(1.0 / 60.0, Vector2.ZERO)
+	check(fluid.positions != old and intact(fluid), "Explicit settling keeps the stream moving and every parcel accounted for after the threshold")
+	check(fluid.lost_without_rim == 0, "Full-circuit losses have crossed a physical rim; no water leaks through the terrain")
 	fluid.reset()
 	check(not fluid.completed and fluid.held_seconds == 0.0 and fluid.lost_count == 0, "Restart restores all water and clears completion")
 	check(advance(fluid, 120, Vector2(1000, -1000)), "Extreme input is clamped and leaves a finite simulation")
@@ -133,12 +141,26 @@ func _run() -> void:
 	drop.set_particle(0, Vector3(2.5, LEVEL.elevation(2) + WATER.particle_radius, 0), Vector3(3, 0, 1))
 	advance(drop, 15, Vector2.ZERO)
 	check(drop.positions[0].x <= 2.601 - WATER.particle_radius and drop.positions[0].z > 0.14, "Side-wall contact preserves tangential flow")
+	var corners_sealed := true
+	for corner: Vector2 in [Vector2(2.575, 4.475), Vector2(-2.575, 4.475), Vector2(-2.575, -4.475), Vector2(2.575, -4.475)]:
+		drop.reset()
+		var direction := Vector2(signf(corner.x), signf(corner.y)).normalized()
+		drop.set_particle(0, Vector3(corner.x, LEVEL.floor_height(corner) + WATER.particle_radius, corner.y), Vector3(direction.x, 0, direction.y) * WATER.max_speed)
+		for frame: int in range(20):
+			drop.step(1.0 / 60.0, direction)
+			var point := drop.positions[0]
+			corners_sealed = corners_sealed and drop.lost_count == 0 and point.y >= LEVEL.floor_height(Vector2(point.x, point.z)) - 0.001
+	check(corners_sealed, "Fast diagonal contacts at all four outer corners cannot push water through tile seams")
 	drop.set_particle(0, Vector3(-1.3, 1.3, 0), Vector3(2, 0, 0))
 	advance(drop, 10, Vector2.ZERO)
 	check(drop.positions[0].x > -1.05 and drop.positions[0].y > 1.0, "Airborne water can cross above a finite wall")
 	drop.set_particle(0, Vector3(0, 1.5, 1), Vector3.ZERO)
 	drop.step(1.0 / 60.0, Vector2.ZERO)
 	check(drop.goal_fraction == 0.0, "Flying above the vessel does not count as delivered water")
+	drop.set_particle(0, Vector3(0.682, 0.45, 2.075), Vector3.ZERO)
+	drop.step(1.0 / 60.0, Vector2.ZERO)
+	check(drop.delivered_count == 1 and drop.goal_fraction == 1.0 and LEVEL.is_in_goal(drop.positions[0]), "Water above the former 34 cm cutoff and against the receiver wall is fully delivered")
+	check(drop.delivered_count + drop.remaining_count + drop.lost_count == 1, "Delivered, on-board and lost counts partition the original volume")
 	drop.set_particle(0, Vector3(4.5, -1.8, 0), Vector3.ZERO)
 	advance(drop, 30, Vector2.ZERO)
 	check(drop.lost_count == 1 and drop.is_unwinnable(), "Water spilled off the board is counted and can make a level unwinnable")
@@ -265,10 +287,15 @@ func _run() -> void:
 	Input.set_gravity(Vector3(3, -3, 8.8))
 	for frame: int in range(120): game._physics_process(1.0 / 60.0)
 	check(game.screen == game.Screen.READY and not game.running and waiting == game.simulation.positions, "Closed reservoir holds all water regardless of phone input before release")
-	check(game.board.reservoir.visible and not game.hud.field.active, "Reservoir is visibly closed and gameplay gestures wait for release")
+	check(game.board.reservoir.visible and game.hud.field.active and not game.hud.field.rotation_enabled, "Closed reservoir accepts object taps while phone steering cannot release it")
 	game._pause()
 	game._resume()
 	check(game.screen == game.Screen.READY and not game.running, "Pausing preparation returns to the closed reservoir")
+	game._release(&"other_source")
+	check(game.screen == game.Screen.READY and not game.opening, "Opening is addressed to an individual source; unrelated reservoir IDs do not release this one")
+	var reservoir_point: Vector3 = game.board.to_global(game.board.source_anchor(LEVEL.reservoir_id))
+	var reservoir_screen: Vector2 = game.camera.unproject_position(reservoir_point)
+	check(game.board.pick_source(game.camera.project_ray_origin(reservoir_screen), game.camera.project_ray_normal(reservoir_screen)) == LEVEL.reservoir_id, "Camera ray picking selects the closed reservoir geometry")
 	sensor_angle(18.0)
 	game._release()
 	check(game.controls.neutral.distance_to(game.controls.sensor_vector()) < 0.00001, "Opening calibrates the phone position at the actual moment of release")
@@ -328,15 +355,23 @@ func _run() -> void:
 	var enclosed: PackedVector3Array = game.simulation.positions.duplicate()
 	var down_consistent := true
 	var rotation_fits := true
+	var fixed_size: float = game.camera.size
+	var fixed_basis: Basis = game.camera.basis
+	var upright := true
 	for turn: float in [PI / 2.0, -PI, PI / 4.0, PI]:
 		game.hud.field.rotation_changed.emit(turn)
+		var bottom: Vector2 = game.camera.unproject_position(game.pivot.to_global(Vector3.ZERO))
+		var above: Vector2 = game.camera.unproject_position(game.pivot.to_global(Vector3.UP))
+		upright = upright and absf(above.x - bottom.x) < 0.001 and above.y < bottom.y
+		upright = upright and game.camera.basis.is_equal_approx(fixed_basis) and is_equal_approx(game.camera.size, fixed_size)
 		var gravity_screen: Vector2 = game.world_to_input(game.input_to_world(Vector2.DOWN))
 		down_consistent = down_consistent and gravity_screen.distance_to(Vector2.DOWN) < 0.0001
 		for x: float in [LEVEL.board_bounds.position.x, LEVEL.board_bounds.end.x]:
 			for z: float in [LEVEL.board_bounds.position.y, LEVEL.board_bounds.end.y]:
 				for y: float in [LEVEL.base_height - 0.08, LEVEL.board_top + 0.12]:
-					rotation_fits = rotation_fits and root.get_visible_rect().has_point(game.camera.unproject_position(Vector3(x, y, z)))
+					rotation_fits = rotation_fits and root.get_visible_rect().has_point(game.camera.unproject_position(game.pivot.to_global(Vector3(x, y, z))))
 	check(down_consistent and absf(game.rotation_angle) > 0.1, "Rotating the board changes its orientation while screen gravity stays down")
+	check(upright, "The board turns in 3D beneath a fixed isometric camera; verticals remain upright and zoom is constant")
 	check(rotation_fits, "The complete glass volume fits at both clockwise and counterclockwise orientations")
 	check(enclosed == game.simulation.positions and game.hud.field.active, "Preparing the board allows rotation while all water remains enclosed")
 	var retained_angle: float = game.rotation_angle
@@ -357,6 +392,12 @@ func _run() -> void:
 	game._restart()
 	check(game.rotation_angle == 0.0, "Restart restores the original board orientation")
 	release_water(game)
+	# Place a real, stationary parcel volume in the physical receiver. The
+	# native delivery counter must measure it before the result-delay checks.
+	for i: int in range(LEVEL.particle_count):
+		var point := Vector3(-0.64 + (i % 34 + 0.5) * 1.28 / 34.0, LEVEL.elevation(4) + (i / (34 * 50) + 0.5) * WATER.particle_spacing, 0.12 + ((i / 34) % 50 + 0.5) * 1.84 / 50.0)
+		game.simulation.native_solver().call("set_particle_state", i, point, Vector3.ZERO)
+	game.simulation.settle(1.0 / 60.0, Vector2.ZERO)
 	game._begin_finish()
 	check(game.screen == game.Screen.FINISHING and game.hud.page == null and not game.hud.field.active, "Delivery leaves the vessel visible before showing completion")
 	for frame: int in range(15): game._physics_process(1.0 / 60.0)
@@ -366,11 +407,11 @@ func _run() -> void:
 	game._physics_process(1.0)
 	check(is_equal_approx(game.finish_remaining, finish_wait), "Pausing freezes the completion delay")
 	game._resume()
-	check(game.screen == game.Screen.FINISHING and not game.running, "Continue restores the pending result without restarting physics")
+	check(game.screen == game.Screen.FINISHING and not game.running, "Continue restores the pending result and its explicit settling phase")
 	for frame: int in range(14): game._physics_process(1.0 / 60.0)
 	check(game.screen == game.Screen.FINISHING, "Result remains visible until the full half second has elapsed")
 	for frame: int in range(2): game._physics_process(1.0 / 60.0)
-	check(game.screen == game.Screen.WON and game.hud.buttons.has("win_menu"), "Completion modal opens after half a second of foreground time")
+	check(game.screen == game.Screen.WON and game.hud.buttons.has("win_menu"), "Completion modal opens after the full quiet half second")
 	game._restart()
 	check(game.finish_remaining == 0 and game.board.gate_open_amount == 0, "Restart clears a pending result and returns the cover")
 	release_water(game)

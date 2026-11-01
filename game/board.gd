@@ -21,6 +21,11 @@ var _status: MeshInstance3D
 var _closed_light: StandardMaterial3D
 var _open_light: StandardMaterial3D
 var hazard_edges: Array[Node3D] = []
+var _step_lower := ShaderMaterial.new()
+var source_targets: Dictionary = {}
+var _spill_cues: Array[MeshInstance3D] = []
+var _spill_ages: Array[float] = []
+var _spill_material: StandardMaterial3D
 var _batches: Dictionary = {}
 
 
@@ -43,6 +48,8 @@ func build(level: LevelDefinition) -> void:
 	_glass = _glass_material(0.13)
 	_glass_edge = _glass_material(0.42)
 	_step.shader = preload("res://assets/materials/hazard.gdshader")
+	_step_lower.shader = _step.shader
+	_step_lower.set_shader_parameter("stripe_direction", -1.0)
 	var floors: Array[Material] = []
 	for i: int in range(level.floor_regions.size()):
 		floors.append(_material(Color("e1e7e5").lerp(Color("b5c3c2"), float(i) / 5.0), 0.85))
@@ -82,10 +89,13 @@ func build(level: LevelDefinition) -> void:
 	baseplate.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var goal := level.goal
 	var top := level.board_top + 0.026
-	_box(Vector3(goal.size.x + 0.15, 0.04, 0.10), Vector3(goal.get_center().x, top, goal.end.y + 0.02), _red)
-	for x: float in [goal.position.x - 0.02, goal.end.x + 0.02]:
-		_box(Vector3(0.10, 0.04, goal.size.y), Vector3(x, top, goal.get_center().y), _red)
+	var rim := _box(Vector3(goal.size.x + 0.15, 0.04, 0.10), Vector3(goal.get_center().x, top, goal.end.y), _red)
+	rim.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for x: float in [goal.position.x, goal.end.x]:
+		var side := _box(Vector3(0.10, 0.04, goal.size.y), Vector3(x, top, goal.get_center().y), _red)
+		side.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_build_reservoir(level)
+	_build_spill_cues()
 
 
 func _mark_step(a: Vector2, b: Vector2, low: float, high: float, downhill: Vector2) -> void:
@@ -97,7 +107,7 @@ func _mark_step(a: Vector2, b: Vector2, low: float, high: float, downhill: Vecto
 	var al := Vector3(a.x, low + 0.004, a.y)
 	var bl := Vector3(b.x, low + 0.004, b.y)
 	_quad(ah - n * 0.24, bh - n * 0.24, bh, ah, Vector3.UP, _step)
-	_quad(al, bl, bl + n * 0.14, al + n * 0.14, Vector3.UP, _step)
+	_quad(al, bl, bl + n * 0.20, al + n * 0.20, Vector3.UP, _step_lower)
 	var tangent := Vector3(b.x - a.x, 0, b.y - a.y).normalized()
 	for fraction: float in [0.33, 0.67]:
 		var centre := ah.lerp(bh, fraction) - n * 0.13 + Vector3.UP * 0.003
@@ -158,6 +168,7 @@ func _build_reservoir(level: LevelDefinition) -> void:
 	var front := r.end.y
 	var center_x := r.get_center().x
 	var port_top := floor_y + 0.35
+	source_targets[level.reservoir_id] = AABB(Vector3(r.position.x - 0.08, floor_y, r.position.y - 0.08), Vector3(r.size.x + 0.16, roof - floor_y + 0.16, r.size.y + 0.16))
 	_gate = Node3D.new()
 	_gate.name = "ReleaseLid"
 	_lid_closed = Vector3(center_x, (port_top + floor_y) * 0.5, front + 0.025)
@@ -185,6 +196,73 @@ func _build_reservoir(level: LevelDefinition) -> void:
 	_open_light = _material(Color("48b8b0"), 0.35)
 	_status = _box(Vector3(0.09, 0.045, 0.03), Vector3(r.end.x - 0.12, port_top + 0.047, front + 0.075), _closed_light, reservoir)
 	set_reservoir_open_amount(0)
+
+
+func source_anchor(id: StringName) -> Vector3:
+	var target: AABB = source_targets[id]
+	return target.get_center() + Vector3.UP * target.size.y * 0.5
+
+
+func pick_source(ray_origin: Vector3, ray_direction: Vector3) -> StringName:
+	var inverse := global_transform.affine_inverse()
+	var origin := inverse * ray_origin
+	var direction := (inverse.basis * ray_direction).normalized()
+	var closest := INF
+	var selected: StringName = &""
+	for id: StringName in source_targets:
+		var hit: Variant = (source_targets[id] as AABB).intersects_ray(origin, direction)
+		if hit is Vector3 and origin.distance_squared_to(hit) < closest:
+			closest = origin.distance_squared_to(hit)
+			selected = id
+	return selected
+
+
+func _build_spill_cues() -> void:
+	_spill_material = _material(Color("269fc9"), 0.3)
+	_spill_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_spill_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_spill_material.albedo_color.a = 0.4
+	for i: int in range(8):
+		var cue := MeshInstance3D.new()
+		var ring := TorusMesh.new()
+		ring.inner_radius = 0.10
+		ring.outer_radius = 0.14
+		ring.rings = 12
+		ring.ring_segments = 6
+		cue.mesh = ring
+		cue.material_override = _spill_material
+		cue.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		cue.hide()
+		add_child(cue)
+		_spill_cues.append(cue)
+		_spill_ages.append(1.0)
+
+
+func show_spills(points: PackedVector3Array) -> void:
+	for point: Vector3 in points:
+		var nearby := false
+		for i: int in range(_spill_cues.size()):
+			if _spill_ages[i] < 0.6 and _spill_cues[i].position.distance_to(point) < 0.6: nearby = true
+		if nearby: continue
+		var slot := _spill_ages.find(_spill_ages.max())
+		_spill_ages[slot] = 0.0
+		_spill_cues[slot].position = point
+		_spill_cues[slot].show()
+
+
+func advance_effects(delta: float) -> void:
+	for i: int in range(_spill_cues.size()):
+		_spill_ages[i] += delta
+		var age := _spill_ages[i]
+		_spill_cues[i].visible = age < 0.6
+		_spill_cues[i].scale = Vector3.ONE * (1.0 + age * 2.0)
+		_spill_cues[i].transparency = clampf(age / 0.6, 0.0, 1.0)
+
+
+func clear_effects() -> void:
+	for i: int in range(_spill_cues.size()):
+		_spill_ages[i] = 1.0
+		_spill_cues[i].hide()
 
 
 func set_reservoir_open_amount(amount: float) -> void:

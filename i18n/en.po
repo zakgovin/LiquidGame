@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.7.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.8.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -119,7 +119,7 @@ msgid "WIN_TITLE"
 msgstr "Level complete"
 
 msgid "WIN_VOLUME"
-msgstr "%d%% of water delivered"
+msgstr "%.1f%% of water delivered"
 
 msgid "FAIL_TITLE"
 msgstr "Water spilled"
@@ -141,3 +141,9 @@ msgstr "Sensitivity changes how quickly the board turns with your finger."
 
 msgid "TILT_ONLY"
 msgstr "Available in Tilt mode"
+
+msgid "TAP_RESERVOIR"
+msgstr "Tap the reservoir ↓"
+
+msgid "WIN_BALANCE"
+msgstr "On the board %.1f%% · Spilled %.1f%%"

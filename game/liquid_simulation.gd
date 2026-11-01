@@ -9,6 +9,10 @@ var positions := PackedVector3Array()
 var velocities := PackedVector3Array()
 var active := PackedByteArray()
 var lost_count: int = 0
+var delivered_count: int = 0
+var remaining_count: int = 0
+var lost_without_rim: int = 0
+var spill_points := PackedVector3Array()
 var goal_fraction: float = 0.0
 var held_seconds: float = 0.0
 var completed: bool = false
@@ -28,7 +32,7 @@ func _init(definition: LevelDefinition, profile: LiquidProfile) -> void:
 		"regions": level.floor_regions, "elevations": level.floor_elevations,
 		"walls": level.wall_segments(), "tiles": level.terrain_tiles(), "bounds": level.board_bounds,
 		"reservoir": level.reservoir_bounds, "spawn": level.spawn, "goal": level.goal,
-		"count": level.particle_count, "top": level.board_top, "base": level.base_height,
+		"count": level.particle_count, "top": level.board_top, "base": level.base_height, "flow_speed": level.flow_speed,
 		"radius": material.particle_radius, "spacing": material.particle_spacing,
 		"rho": material.rest_density, "drag": material.drag, "max_speed": material.max_speed,
 		"viscosity": material.viscosity, "surface_tension": material.surface_tension, "required": level.required_fraction, "hold": level.hold_seconds})
@@ -42,6 +46,11 @@ func reset() -> void:
 
 func step(delta: float, tilt: Vector2) -> void:
 	_native.call("step", delta, tilt)
+	_sync_native()
+
+
+func settle(delta: float, tilt: Vector2) -> void:
+	_native.call("settle", delta, tilt)
 	_sync_native()
 
 
@@ -68,6 +77,10 @@ func _sync_native() -> void:
 	velocities = state.velocities
 	active = state.active
 	lost_count = state.lost
+	delivered_count = state.delivered
+	remaining_count = state.remaining
+	lost_without_rim = state.lost_without_rim
+	spill_points = state.spills
 	goal_fraction = state.fraction
 	held_seconds = state.held
 	completed = state.completed

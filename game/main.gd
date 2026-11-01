@@ -7,6 +7,7 @@ const MAX_TILT: float = PI / 20.0 # Nine degrees; purely visual, never a second 
 
 var simulation: LiquidSimulation
 var controls := TiltInput.new()
+var turntable: Node3D
 var pivot: Node3D
 var surface: FluidSurface
 var hud: HydrologicHUD
@@ -26,18 +27,27 @@ var _paused_from: Screen = Screen.PLAYING
 const OPEN_SECONDS: float = 0.70
 const FINISH_SECONDS: float = 0.50
 var finish_remaining: float = 0.0
+var _finish_elapsed: float = 0.0
+var _finish_delivered: int = 0
+var _finish_tilt := Vector2.ZERO
+const MAX_FINISH_SECONDS: float = 2.0
 var _camera_size: float = 8.35
 var _camera_offset: float = 0.0
 var _camera_horizontal: float = 0.0
 var _camera_basis := Basis.IDENTITY
+var _fit_viewport := Vector2.ZERO
+var _fit_rotation: bool = false
+var _fit_feedback: bool = false
 var rotation_angle: float = 0.0
 
 
 func _ready() -> void:
 	get_tree().auto_accept_quit = false
 	_setup_environment()
+	turntable = Node3D.new()
+	add_child(turntable)
 	pivot = Node3D.new()
-	add_child(pivot)
+	turntable.add_child(pivot)
 	board = HydrologicBoard.new()
 	pivot.add_child(board)
 	board.build(LEVEL)
@@ -53,7 +63,6 @@ func _ready() -> void:
 	add_child(sounds)
 	hud.interaction.connect(func(): sounds.play_event(&"click"))
 	hud.start_requested.connect(_start)
-	hud.release_requested.connect(_release)
 	hud.restart_requested.connect(_restart)
 	hud.pause_requested.connect(_pause)
 	hud.resume_requested.connect(_resume)
@@ -74,7 +83,10 @@ func _ready() -> void:
 		sounds.set_enabled(value)
 		_save_settings())
 	hud.field.rotation_changed.connect(_rotate_field)
+	hud.field.tapped.connect(_tap_field)
+	hud.field.plane_vector = _rotation_vector
 	_load_settings()
+	_configure_camera()
 	controls.sensor_vector()
 	_menu()
 	var args := OS.get_cmdline_user_args()
@@ -95,15 +107,15 @@ func _physics_process(delta: float) -> void:
 		if _opening_remaining <= 0.0:
 			opening = false
 			hud.show_game(controls.use_rotation)
-			_fit_camera()
 	if running:
 		simulation.step(delta, world_tilt)
+		board.show_spills(simulation.spill_points)
 		_render_tick += 1
 		if _render_tick % 2 == 0:
 			surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
 		hud.field.active = not opening and (controls.use_rotation)
 		if simulation.completed:
-			_begin_finish()
+			_begin_finish(world_tilt)
 			return
 		elif simulation.is_unwinnable():
 			running = false
@@ -111,18 +123,37 @@ func _physics_process(delta: float) -> void:
 			sounds.play_event(&"failure")
 			hud.show_failure()
 	if screen == Screen.FINISHING:
+		# Let the tail of the stream reach the vessel before measuring the
+		# result. The quiet interval is real foreground time, not fluid time.
+		simulation.settle(delta, _finish_tilt)
+		board.show_spills(simulation.spill_points)
+		_render_tick += 1
+		if _render_tick % 2 == 0:
+			surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
+		_finish_elapsed += delta
+		if simulation.delivered_count > _finish_delivered + 8:
+			_finish_delivered = simulation.delivered_count
+			finish_remaining = FINISH_SECONDS
 		finish_remaining = maxf(0.0, finish_remaining - delta)
-		if finish_remaining <= 0.0:
+		if simulation.goal_fraction < LEVEL.required_fraction:
+			screen = Screen.PLAYING
+			running = true
+			board.set_goal_complete(false)
+			hud.show_game(controls.use_rotation)
+		elif finish_remaining <= 0.0 or _finish_elapsed >= MAX_FINISH_SECONDS:
 			screen = Screen.WON
-			hud.show_win(simulation.goal_fraction)
+			sounds.play_event(&"complete")
+			hud.show_win(simulation.delivered_count, LEVEL.particle_count, simulation.lost_count)
 	if screen != Screen.PAUSED:
 		_update_camera(delta)
+		board.advance_effects(delta)
 	var target := Vector3.ZERO
 	if tilt_feedback and not controls.use_rotation and screen == Screen.PLAYING:
 		var visible_tilt := world_tilt.normalized() * sqrt(world_tilt.length())
 		target = Vector3(visible_tilt.y * MAX_TILT, 0.0, -visible_tilt.x * MAX_TILT)
 	if screen != Screen.PAUSED:
 		pivot.rotation = pivot.rotation.lerp(target, 1.0 - exp(-7.5 * delta))
+		_position_source_hint()
 	if _screenshot_frame > 0:
 		_screenshot_frame -= 1
 		if _screenshot_frame == 0:
@@ -133,13 +164,20 @@ func _fit_camera() -> void:
 	if not is_instance_valid(pivot) or not is_instance_valid(hud): return
 	var viewport_size := hud.size
 	if viewport_size.x <= 0.0: viewport_size = get_viewport().get_visible_rect().size
-	var preparing := screen == Screen.READY or opening
+	if _fit_viewport == viewport_size and _fit_rotation == controls.use_rotation and _fit_feedback == tilt_feedback: return
+	_fit_viewport = viewport_size
+	_fit_rotation = controls.use_rotation
+	_fit_feedback = tilt_feedback
 	var top := 136.0
-	var bottom := 298.0 if preparing else 48.0
+	var bottom := 48.0
 	var low := Vector2(INF, INF)
 	var high := Vector2(-INF, -INF)
 	var poses: Array[Vector3] = [Vector3.ZERO]
-	if tilt_feedback and not controls.use_rotation:
+	if controls.use_rotation:
+		# Fit the swept 3D bounds once. Neither zoom nor framing changes as
+		# the board turns or its reservoir opens.
+		for i: int in range(64): poses.append(Vector3(0, TAU * i / 64.0, 0))
+	elif tilt_feedback:
 		poses += [Vector3(MAX_TILT, 0, MAX_TILT), Vector3(-MAX_TILT, 0, MAX_TILT), Vector3(MAX_TILT, 0, -MAX_TILT), Vector3(-MAX_TILT, 0, -MAX_TILT)]
 	for pose: Vector3 in poses:
 		var transform_basis := Basis.from_euler(pose)
@@ -153,25 +191,48 @@ func _fit_camera() -> void:
 	var extent := high - low
 	_camera_size = maxf(extent.x * viewport_size.x / maxf(300.0, viewport_size.x - 64.0), extent.y * viewport_size.x / maxf(420.0, viewport_size.y - top - bottom))
 	_camera_horizontal = (high.x + low.x) * 0.5
-	_camera_offset = (high.y + low.y) * 0.5 + (top - bottom) * 0.5 * camera.size / viewport_size.x
-	hud.field.centre = Vector2(viewport_size.x * 0.5, (top + viewport_size.y - bottom) * 0.5)
-	hud.field.blocked_bottom = bottom if preparing else 0.0
+	_camera_offset = (high.y + low.y) * 0.5 + (top - bottom) * 0.5 * _camera_size / viewport_size.x
 
 
-func _update_camera(delta: float) -> void:
+func _update_camera(_delta: float) -> void:
 	_fit_camera()
-	# Widen immediately during a turn so no wall leaves the screen; ease in.
-	camera.size = maxf(_camera_size, lerpf(camera.size, _camera_size, 1.0 - exp(-8.0 * delta)))
-	_fit_camera()
+	camera.size = _camera_size
 	camera.h_offset = _camera_horizontal
-	camera.v_offset = _camera_offset if controls.use_rotation else lerpf(camera.v_offset, _camera_offset, 1.0 - exp(-8.0 * delta))
+	camera.v_offset = _camera_offset
+	hud.field.centre = camera.unproject_position(Vector3(0, 0.35, 0))
+
+
+func _configure_camera() -> void:
+	var target := Vector3(0, 0.2, 0)
+	# A true isometric view has equal foreshortening on all three axes:
+	# 45 degrees of azimuth and atan(1 / sqrt(2)) elevation.
+	camera.position = target + Vector3.ONE * 18.0 if controls.use_rotation else Vector3(2.8, 24, 14)
+	camera.look_at(target)
+	_camera_basis = camera.basis
+	_fit_viewport = Vector2.ZERO
+
+
+func _rotation_vector(point: Vector2) -> Vector2:
+	var hit: Variant = Plane(Vector3.UP, 0.35).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
+	return Vector2(hit.x, hit.z) if hit is Vector3 else Vector2.ZERO
+
+
+func _tap_field(point: Vector2) -> void:
+	if screen != Screen.READY or opening: return
+	var source := board.pick_source(camera.project_ray_origin(point), camera.project_ray_normal(point))
+	if not source.is_empty(): _release(source)
+
+
+func _position_source_hint() -> void:
+	if screen != Screen.READY: return
+	hud.position_source_hint(camera.unproject_position(board.to_global(board.source_anchor(LEVEL.reservoir_id))))
 
 
 func _rotate_field(amount: float) -> void:
 	if not controls.use_rotation or screen not in [Screen.READY, Screen.PLAYING] or opening: return
 	rotation_angle = wrapf(rotation_angle + amount * controls.sensitivity, -PI, PI)
-	camera.basis = _camera_basis * Basis(Vector3.BACK, rotation_angle)
-	_update_camera(0.0)
+	turntable.rotation.y = -rotation_angle
+	_position_source_hint()
 
 
 func _set_control_mode(rotate: bool) -> void:
@@ -179,20 +240,23 @@ func _set_control_mode(rotate: bool) -> void:
 	controls.use_rotation = rotate
 	controls.filtered = Vector2.ZERO
 	rotation_angle = 0.0
-	camera.basis = _camera_basis
+	turntable.rotation = Vector3.ZERO
+	_configure_camera()
 	_save_settings()
 	_settings()
 	hud.settings_scroll.set_deferred("scroll_vertical", scroll_position)
 
 
-func _begin_finish() -> void:
+func _begin_finish(tilt: Vector2 = Vector2.ZERO) -> void:
 	running = false
 	screen = Screen.FINISHING
 	finish_remaining = FINISH_SECONDS
+	_finish_elapsed = 0.0
+	_finish_delivered = simulation.delivered_count
+	_finish_tilt = tilt
 	hud.show_game(false)
 	board.set_goal_complete(true)
 	surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
-	sounds.play_event(&"complete")
 
 
 func _start() -> void:
@@ -205,18 +269,20 @@ func input_to_world(value: Vector2) -> Vector2:
 	var up := camera.global_basis.y
 	var determinant := right.x * -up.z - right.z * -up.x
 	var world := Vector2((value.x * -up.z - value.y * right.z) / determinant, (value.y * right.x + value.x * up.x) / determinant)
-	return world.normalized() * value.length()
+	var local := turntable.basis.inverse() * Vector3(world.x, 0, world.y)
+	return Vector2(local.x, local.z).normalized() * value.length()
 
 
 func world_to_input(value: Vector2) -> Vector2:
 	if value.is_zero_approx(): return Vector2.ZERO
 	var right := camera.global_basis.x
 	var up := camera.global_basis.y
-	return Vector2(right.x * value.x + right.z * value.y, -up.x * value.x - up.z * value.y).normalized() * value.length()
+	var world := turntable.basis * Vector3(value.x, 0, value.y)
+	return Vector2(right.dot(world), -up.dot(world)).normalized() * value.length()
 
 
-func _release() -> void:
-	if screen != Screen.READY or opening: return
+func _release(source: StringName = &"source_01") -> void:
+	if screen != Screen.READY or opening or source != LEVEL.reservoir_id: return
 	controls.calibrate()
 	opening = true
 	running = true
@@ -234,18 +300,18 @@ func _restart() -> void:
 	controls.filtered = Vector2.ZERO
 	pivot.rotation = Vector3.ZERO
 	rotation_angle = 0.0
-	camera.basis = _camera_basis
+	turntable.rotation = Vector3.ZERO
+	_configure_camera()
 	board.set_reservoir_open_amount(0.0)
 	board.set_goal_complete(false)
+	board.clear_effects()
 	finish_remaining = 0.0
 	opening = false
 	running = false
 	screen = Screen.READY
-	_fit_camera()
-	camera.size = _camera_size
-	camera.v_offset = _camera_offset
 	hud.show_ready(false, controls.use_rotation)
-	_fit_camera()
+	_update_camera(0.0)
+	_position_source_hint()
 
 
 func _pause() -> void:
@@ -266,6 +332,7 @@ func _resume() -> void:
 	elif running: hud.show_game(controls.use_rotation)
 	elif screen == Screen.FINISHING: hud.show_game(false)
 	else: hud.show_ready(opening, controls.use_rotation)
+	_position_source_hint()
 
 
 func _menu() -> void:

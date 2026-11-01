@@ -13,6 +13,8 @@ extends Resource
 @export var particle_count: int = 8192
 @export var required_fraction: float = 0.8
 @export var hold_seconds: float = 0.75
+@export var flow_speed: float = 1.15
+@export var reservoir_id: StringName = &"source_01"
 @export var board_bounds: Rect2 = Rect2(-2.95, -4.9, 5.9, 9.8)
 @export var board_top: float = 1.26
 @export var base_height: float = -0.56
@@ -68,7 +70,7 @@ func constrain_world(point: Vector3, _previous: Vector3, radius: float) -> Vecto
 
 func is_in_goal(point: Vector3) -> bool:
 	var horizontal := Vector2(point.x, point.z)
-	return goal.has_point(horizontal) and point.y < floor_height(horizontal) + 0.34
+	return goal.has_point(horizontal) and point.y >= floor_height(horizontal) and point.y < board_top
 
 
 func terrain_tiles() -> Array[Dictionary]:

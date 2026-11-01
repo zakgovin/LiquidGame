@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode blend_mix, cull_back, depth_draw_always;
+render_mode blend_mix, cull_back, depth_draw_always, shadows_disabled;
 uniform vec4 water_color : source_color = vec4(0.07, 0.55, 0.76, 1.0);
 varying float water_depth;
 void vertex() {
@@ -13,5 +13,5 @@ void fragment() {
  ROUGHNESS = 0.065;
  METALLIC = 0.0;
  SPECULAR = 0.35;
- ALPHA = clamp(0.45 + absorption * 0.34 + fresnel * 0.25, 0.45, 0.92);
+ ALPHA = clamp(0.34 + absorption * 0.28 + fresnel * 0.22, 0.34, 0.82);
 }
