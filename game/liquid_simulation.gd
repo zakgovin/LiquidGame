@@ -12,6 +12,7 @@ var lost_count: int = 0
 var delivered_count: int = 0
 var remaining_count: int = 0
 var lost_without_rim: int = 0
+var lost_in_void: int = 0
 var spill_points := PackedVector3Array()
 var goal_fraction: float = 0.0
 var held_seconds: float = 0.0
@@ -30,6 +31,8 @@ func _init(definition: LevelDefinition, profile: LiquidProfile) -> void:
 	_native = ClassDB.instantiate("NativeLiquidSolver") as RefCounted
 	_native.call("configure", {
 		"regions": level.floor_regions, "elevations": level.floor_elevations,
+		"polygons": level.channel_polygons(), "polygon_heights": level.channel_heights(), "voids": level.void_regions,
+		"openings": level.opening_polygons(), "curved": not level.channel_curves.is_empty() or not level.void_regions.is_empty(),
 		"walls": level.wall_segments(), "tiles": level.terrain_tiles(), "bounds": level.board_bounds,
 		"reservoir": level.reservoir_bounds, "spawn": level.spawn, "goal": level.goal,
 		"count": level.particle_count, "top": level.board_top, "base": level.base_height, "flow_speed": level.flow_speed,
@@ -80,6 +83,7 @@ func _sync_native() -> void:
 	delivered_count = state.delivered
 	remaining_count = state.remaining
 	lost_without_rim = state.lost_without_rim
+	lost_in_void = state.lost_in_void
 	spill_points = state.spills
 	goal_fraction = state.fraction
 	held_seconds = state.held

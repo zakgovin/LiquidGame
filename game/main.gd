@@ -205,8 +205,9 @@ func _configure_camera() -> void:
 	# Keep the 45-degree azimuth, but look down steeply enough to see into
 	# the channels at every turn. Projection, framing and scale stay fixed.
 	if controls.use_rotation:
-		var horizontal := cos(ROTATION_CAMERA_ELEVATION) * 32.0 / sqrt(2.0)
-		camera.position = target + Vector3(horizontal, sin(ROTATION_CAMERA_ELEVATION) * 32.0, horizontal)
+		var elevation := deg_to_rad(level.camera_elevation)
+		var horizontal := cos(elevation) * 32.0 / sqrt(2.0)
+		camera.position = target + Vector3(horizontal, sin(elevation) * 32.0, horizontal)
 	else:
 		camera.position = Vector3(2.8, 24, 14)
 	camera.look_at(target)
@@ -446,7 +447,7 @@ func _setup_environment() -> void:
 	environment.background_color = Color("eaf0ef")
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color("e2f0f5")
-	environment.ambient_light_energy = 1.0
+	environment.ambient_light_energy = 0.45
 	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	var sky := Sky.new()
 	var sky_material := ShaderMaterial.new()
@@ -459,7 +460,7 @@ func _setup_environment() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-62, -28, 0)
 	sun.light_color = Color("fff5e6")
-	sun.light_energy = 0.22
+	sun.light_energy = 0.75
 	# Volume comes from the materials and fixed studio light. No moving
 	# shadow maps, including those of the lid, hardware or transparent walls.
 	sun.shadow_enabled = false

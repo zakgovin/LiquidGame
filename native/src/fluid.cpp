@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 #include <algorithm>
 #include <array>
@@ -23,6 +24,7 @@ Vector3 limited(Vector3 v, float maximum) {
     return squared > maximum * maximum ? v * (maximum / std::sqrt(squared)) : v;
 }
 struct Tile { Rect2 rectangle; float height; };
+struct PolygonFloor { std::vector<Vector2> points; std::vector<std::vector<int>> scan_edges; Rect2 bounds; float height = 0; };
 struct FaceGrid {
     std::vector<float> velocity, before, weight;
     std::vector<uint8_t> valid;
@@ -33,26 +35,32 @@ struct FaceGrid {
 class NativeLiquidSolver : public RefCounted {
     GDCLASS(NativeLiquidSolver, RefCounted)
     std::vector<Rect2> floors;
+    std::vector<Rect2> voids;
+    std::vector<PolygonFloor> polygons, openings;
     std::vector<float> elevations;
     std::vector<Tile> tiles;
     std::vector<std::array<float, 6>> walls;
     std::vector<Vector3> wall_normals;
+    std::vector<int> wall_indices, no_walls;
+    std::vector<std::vector<int>> wall_bins;
     Rect2 bounds, reservoir, goal;
     float top = 1.05f, base = -.56f, spacing = .038f, radius = .017f;
     float cell_size = .07f, mass_density = 1000, viscosity = .000001f;
     float drag = .015f, max_speed = 3, flip_ratio = .95f;
     float surface_tension = .072f;
+    float lowest_floor = 0;
     float required = .8f, hold_seconds = .75f, fraction = 0, held = 0, flow_speed = 1.15f;
     float maximum_divergence = 0, liquid_volume = 0;
-    int count = 0, lost = 0, delivered = 0, lost_without_rim = 0, nx = 0, ny = 0, nz = 0, plane = 0, total = 0;
+    int count = 0, lost = 0, delivered = 0, lost_without_rim = 0, lost_in_void = 0, nx = 0, ny = 0, nz = 0, plane = 0, total = 0;
     int pressure_steps = 0;
     bool completed = false, reservoir_open = false, gate_controlled = false;
+    bool curved = false;
     float gate_fraction = 0, gate_lower = .42f;
     std::vector<int> gate_cells;
     Vector3 origin;
     std::vector<Vector3> positions, velocities;
     std::vector<Vector3> spill_points;
-    std::vector<uint8_t> over_rim, escaped;
+    std::vector<uint8_t> over_rim, escaped, through_void, loss_reason;
     std::vector<uint8_t> active, solid, vertical_wall;
     std::vector<int> liquid_id, liquid_cells;
     std::vector<int> marker_count;
@@ -71,12 +79,54 @@ class NativeLiquidSolver : public RefCounted {
     bool is_solid(int x, int y, int z) const {
         return !in_grid(x, y, z) || solid[index(x, y, z)];
     }
+    static PolygonFloor read_polygon(PackedVector2Array points, float height = 0) {
+        PolygonFloor p; p.height = height;
+        Vector2 low(1e10f,1e10f), high(-1e10f,-1e10f);
+        for (int i=0;i<points.size();++i) {
+            p.points.push_back(points[i]);
+            low.x=std::min(low.x,points[i].x); low.y=std::min(low.y,points[i].y);
+            high.x=std::max(high.x,points[i].x); high.y=std::max(high.y,points[i].y);
+        }
+        p.bounds=Rect2(low,high-low).grow(.00001f);
+        p.scan_edges.resize(std::max(1,int(std::ceil(p.bounds.size.y/.14f))+1));
+        for (size_t i=0,j=p.points.size()-1;i<p.points.size();j=i++) {
+            int first=std::max(0,int(std::floor((std::min(p.points[i].y,p.points[j].y)-.00001f-p.bounds.position.y)/.14f)));
+            int last=std::min(int(p.scan_edges.size())-1,int(std::floor((std::max(p.points[i].y,p.points[j].y)+.00001f-p.bounds.position.y)/.14f)));
+            for (int k=first;k<=last;++k) p.scan_edges[k].push_back(int(i));
+        }
+        return p;
+    }
+    static bool inside_polygon(Vector2 point, const PolygonFloor &p) {
+        if (!p.bounds.has_point(point)) return false;
+        bool inside=false;
+        int bucket=std::min(int(p.scan_edges.size())-1,std::max(0,int((point.y-p.bounds.position.y)/.14f)));
+        for (int i:p.scan_edges[bucket]) {
+            int j=(i+int(p.points.size())-1)%p.points.size();
+            Vector2 a=p.points[i],b=p.points[j],v=b-a;
+            if (point.x>=std::min(a.x,b.x)-1e-6f && point.x<=std::max(a.x,b.x)+1e-6f && point.y>=std::min(a.y,b.y)-1e-6f && point.y<=std::max(a.y,b.y)+1e-6f) {
+                float cross=v.cross(point-a);
+                if (cross*cross<1e-12f*std::max(v.length_squared(),1e-12f)) return true;
+            }
+            if ((a.y>point.y)!=(b.y>point.y) && point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x) inside=!inside;
+        }
+        return inside;
+    }
     float floor_height(Vector2 point) const {
         if (!bounds.has_point(point)) return -std::numeric_limits<float>::infinity();
         float height = top;
         for (size_t i = 0; i < floors.size(); ++i)
             if (floors[i].has_point(point)) height = std::min(height, elevations[i]);
+        for (const auto &p : polygons) if (inside_polygon(point,p)) height=std::min(height,p.height);
+        if (height==top) for (auto r:voids) if (r.has_point(point)) return -std::numeric_limits<float>::infinity();
         return height;
+    }
+    bool is_void(Vector2 point) const {
+        for (auto r:voids) if (r.has_point(point) && !std::isfinite(floor_height(point))) return true;
+        return false;
+    }
+    const std::vector<int> &nearby_walls(Vector3 point) const {
+        int x=int(std::floor((point.x-origin.x)/cell_size)),z=int(std::floor((point.z-origin.z)/cell_size));
+        return x>=0 && z>=0 && x<nx && z<nz ? wall_bins[z*nx+x] : no_walls;
     }
     bool face_blocked(int component, int x, int y, int z) const {
         if (!in_grid(x, y, z)) return true;
@@ -252,7 +302,8 @@ class NativeLiquidSolver : public RefCounted {
         // Sweep the exposed faces before resolving rounded contacts. A
         // single nearest-face projection on adjacent solid tiles can push a
         // parcel through their hidden shared seam at an inside corner.
-        for (size_t i = 0; i < walls.size(); ++i) {
+        const auto &candidates = curved ? nearby_walls(previous) : wall_indices;
+        for (int i : candidates) {
             const auto &wall = walls[i]; Vector3 normal = wall_normals[i];
             Vector3 anchor(wall[0],0,wall[1]);
             float before = (previous-anchor).dot(normal), after = (point-anchor).dot(normal);
@@ -260,8 +311,29 @@ class NativeLiquidSolver : public RefCounted {
             float t = clampf((before-radius)/(before-after),0,1);
             Vector3 hit = previous.lerp(point,t);
             if (hit.y <= wall[4] || hit.y >= wall[5]) continue;
-            bool on_face = normal.x != 0 ? hit.z >= wall[1]-.0001f && hit.z <= wall[3]+.0001f : hit.x >= wall[0]-.0001f && hit.x <= wall[2]+.0001f;
+            Vector2 edge(wall[2]-wall[0],wall[3]-wall[1]);
+            float along=Vector2(hit.x-wall[0],hit.z-wall[1]).dot(edge)/std::max(edge.length_squared(),1e-12f);
+            bool on_face = curved ? along>=-.0001f && along<=1.0001f : (normal.x != 0 ? hit.z >= wall[1]-.0001f && hit.z <= wall[3]+.0001f : hit.x >= wall[0]-.0001f && hit.x <= wall[2]+.0001f);
             if (on_face) point += normal * (radius-after);
+        }
+        if (curved) for (int i:candidates) {
+            const auto &wall=walls[i];
+            for (int endpoint:{0,2}) {
+                Vector2 centre(wall[endpoint],wall[endpoint+1]);
+                Vector2 start(previous.x,previous.z),motion(point.x-previous.x,point.z-previous.z),offset=start-centre;
+                float a=motion.length_squared(),b=2*offset.dot(motion),c=offset.length_squared()-radius*radius;
+                float discriminant=b*b-4*a*c;
+                if (a<1e-12f || c<-.000001f || discriminant<0) continue;
+                float t=(-b-std::sqrt(discriminant))/(2*a);
+                if (t<0 || t>1) continue;
+                float y=previous.y+(point.y-previous.y)*t;
+                if (y<=wall[4] || y>=wall[5]) continue;
+                Vector2 at=start+motion*t,n=(at-centre).normalized(),rest=motion*(1-t);
+                float inward=rest.dot(n);
+                if (inward>=0) continue;
+                Vector2 corrected=at+rest-n*inward;
+                point.x=corrected.x; point.z=corrected.y;
+            }
         }
         Vector2 xz(point.x, point.z);
         float floor = floor_height(xz);
@@ -269,7 +341,22 @@ class NativeLiquidSolver : public RefCounted {
         Vector3 q = (point - origin) / cell_size;
         int x = int(std::floor(q.x)), y = int(std::floor(q.y)), z = int(std::floor(q.z));
         bool needs_walls = in_grid(x, y, z) && vertical_wall[index(x, y, z)];
-        if (needs_walls) for (int pass = 0; pass < 2; ++pass) for (const auto &tile : tiles) {
+        if (curved) for (int pass=0;pass<3;++pass) for (int i:candidates) {
+            const auto &wall=walls[i];
+            if (point.y<wall[4]-radius || point.y>wall[5]+radius) continue;
+            Vector2 a(wall[0],wall[1]),edge(wall[2]-wall[0],wall[3]-wall[1]);
+            float t=Vector2(point.x-a.x,point.z-a.y).dot(edge)/std::max(edge.length_squared(),1e-12f);
+            Vector2 horizontal=a+edge*clampf(t,0,1);
+            Vector3 nearest(horizontal.x,clampf(point.y,wall[4],wall[5]),horizontal.y);
+            float signed_distance=(point-Vector3(a.x,0,a.y)).dot(wall_normals[i]);
+            if (t>=0 && t<=1 && point.y>wall[4] && point.y<wall[5] && signed_distance<radius && signed_distance>-.15f) {
+                point+=wall_normals[i]*(radius-signed_distance);
+            } else {
+                Vector3 difference=point-nearest; float distance=difference.length();
+                if (distance>1e-7f && distance<radius) point+=difference*(radius/distance-1);
+            }
+        }
+        if (!curved && needs_walls) for (int pass = 0; pass < 2; ++pass) for (const auto &tile : tiles) {
             const Rect2 &r = tile.rectangle;
             if (point.y >= tile.height + radius || point.y < base - radius || !r.grow(radius).has_point(Vector2(point.x, point.z))) continue;
             point = collide_box(point, Vector3(r.position.x, base, r.position.y), Vector3(r.get_end().x, tile.height, r.get_end().y), radius);
@@ -391,10 +478,24 @@ class NativeLiquidSolver : public RefCounted {
                 candidate = previous + (velocities[i] + velocity) * (.5f * dt);
             }
             Vector3 point = constrain(candidate, previous), contact = candidate - point;
-            if (contact.x * velocity.x > 0) velocity.x = 0;
             if (contact.y * velocity.y > 0) velocity.y = 0;
-            if (contact.z * velocity.z > 0) velocity.z = 0;
+            if (curved) {
+                Vector2 normal(contact.x,contact.z),horizontal(velocity.x,velocity.z);
+                if (normal.length_squared()>1e-12f) {
+                    normal.normalize(); horizontal-=normal*std::max(horizontal.dot(normal),0.f);
+                    velocity.x=horizontal.x; velocity.z=horizontal.y;
+                }
+            } else {
+                if (contact.x * velocity.x > 0) velocity.x = 0;
+                if (contact.z * velocity.z > 0) velocity.z = 0;
+            }
             positions[i] = point; velocities[i] = velocity;
+            // Keep the opening provenance until a parcel actually lands on a
+            // solid surface. A missed jet may travel underneath the catcher;
+            // crossing its XZ footprint alone must not clear that provenance.
+            float supporting_floor=floor_height(Vector2(point.x,point.z));
+            if (is_void(Vector2(point.x,point.z))) through_void[i]=1;
+            else if (std::isfinite(supporting_floor) && point.y>=supporting_floor+radius-.0001f) through_void[i]=0;
             if (std::max({previous.y, candidate.y, point.y}) >= top - radius) over_rim[i] = 1;
             if (!escaped[i] && !bounds.has_point(Vector2(point.x, point.z))) {
                 escaped[i] = 1;
@@ -405,7 +506,9 @@ class NativeLiquidSolver : public RefCounted {
             }
             if (point.y < base - .65f || !bounds.grow(.42f).has_point(Vector2(point.x, point.z))) {
                 active[i] = 0; ++lost;
-                if (!over_rim[i]) ++lost_without_rim;
+                if (through_void[i]) { ++lost_in_void; loss_reason[i]=2; if (spill_points.size()<8) spill_points.push_back(point); }
+                else if (!over_rim[i]) { ++lost_without_rim; loss_reason[i]=3; }
+                else loss_reason[i]=1;
             }
         }
 
@@ -445,6 +548,7 @@ class NativeLiquidSolver : public RefCounted {
     }
     Vector3 surface_contact(Vector3 point) const {
         float height = floor_height(Vector2(point.x, point.z));
+        if (curved && point.y < base - .01f) return point;
         if (!std::isfinite(height) || point.y >= height + .001f) return point;
         if (height - point.y < SURFACE_Y) { point.y = height + .001f; return point; }
         if (point.y >= top) return point;
@@ -454,6 +558,28 @@ class NativeLiquidSolver : public RefCounted {
             Vector2 candidate(clampf(point.x, r.position.x, end.x), clampf(point.z, r.position.y, end.y));
             float distance = candidate.distance_squared_to(Vector2(point.x, point.z));
             if (distance < best) { nearest = candidate; best = distance; }
+        }
+        if (curved) {
+            // Surface vertices lie within one reconstruction kernel of a
+            // physical wall. Reuse its spatial bin instead of scanning every
+            // curve edge for every triangle vertex on a phone.
+            auto consider=[&](const std::vector<int> &indices) {
+                for (int i:indices) {
+                    const auto &wall=walls[i];
+                    if (point.y<wall[4]-.002f || point.y>wall[5]+.002f) continue;
+                    Vector2 a(wall[0],wall[1]),edge(wall[2]-wall[0],wall[3]-wall[1]);
+                    float t=clampf((Vector2(point.x,point.z)-a).dot(edge)/std::max(edge.length_squared(),1e-12f),0,1);
+                    Vector3 n=wall_normals[i];
+                    Vector2 candidate=a+edge*t+Vector2(n.x,n.z)*.001f;
+                    float distance=candidate.distance_squared_to(Vector2(point.x,point.z));
+                    if (distance>=best) continue;
+                    float h=floor_height(candidate);
+                    if (std::isfinite(h) && h>point.y+.002f) continue;
+                    nearest=candidate; best=distance;
+                }
+            };
+            consider(nearby_walls(point));
+            if (best==1e20f) consider(wall_indices);
         }
         point.x = nearest.x; point.z = nearest.y; return point;
     }
@@ -469,6 +595,34 @@ class NativeLiquidSolver : public RefCounted {
         float weight = 315 * volume / (64 * 3.14159265359f * KERNEL * KERNEL * KERNEL);
         for (int i = 0; i < count; ++i) if (active[i]) {
             auto p = positions[i];
+            if (curved) {
+                Vector3 normals[2],anchors[2]; float distances[2]={KERNEL,KERNEL}; int mirrors=0;
+                for (int j:nearby_walls(p)) {
+                    const auto &wall=walls[j];
+                    if (p.y<wall[4]-.001f || p.y>wall[5]+.001f) continue;
+                    Vector2 a(wall[0],wall[1]),edge(wall[2]-wall[0],wall[3]-wall[1]);
+                    float t=clampf(Vector2(p.x-a.x,p.z-a.y).dot(edge)/std::max(edge.length_squared(),1e-12f),0,1);
+                    Vector2 q=a+edge*t; float d=q.distance_to(Vector2(p.x,p.z));
+                    if (d>=KERNEL) continue;
+                    Vector3 n=wall_normals[j],anchor(a.x,0,a.y);
+                    if ((p-anchor).dot(n)<-.001f) continue;
+                    if (mirrors==0) { normals[0]=n; anchors[0]=anchor; distances[0]=d; mirrors=1; }
+                    else if (std::abs(normals[0].dot(n))>.7f) {
+                        if (d<distances[0]) { normals[0]=n; anchors[0]=anchor; distances[0]=d; }
+                    } else if (d<distances[1]) { normals[1]=n; anchors[1]=anchor; distances[1]=d; mirrors=2; }
+                }
+                if (mirrors<2 && (p.y>=gate_lower || p.y>=elevations[0]+.35f) && reservoir.has_point(Vector2(p.x,p.z)) && reservoir.get_end().y-p.z<KERNEL) {
+                    normals[mirrors]=Vector3(0,0,-1); anchors[mirrors]=Vector3(0,0,reservoir.get_end().y); ++mirrors;
+                }
+                float floor=floor_height(Vector2(p.x,p.z));
+                for (int mask=0;mask<(1<<mirrors);++mask) {
+                    Vector3 image=p;
+                    for (int m=0;m<mirrors;++m) if (mask&(1<<m)) image-=normals[m]*(2*(image-anchors[m]).dot(normals[m]));
+                    splat_surface(image,weight);
+                    if (std::isfinite(floor) && p.y-floor<KERNEL) splat_surface(Vector3(image.x,2*floor-p.y,image.z),weight);
+                }
+                continue;
+            }
             float mirror_x = 0, mirror_z = 0, distance_x = KERNEL, distance_z = KERNEL;
             for (const auto &wall : walls) {
                 if (p.y < wall[4] - .001f || p.y > wall[5] + .001f) continue;
@@ -576,43 +730,69 @@ protected:
         ClassDB::bind_method(D_METHOD("set_gate_opening", "amount"), &NativeLiquidSolver::set_gate_opening);
         ClassDB::bind_method(D_METHOD("get_state"), &NativeLiquidSolver::get_state);
         ClassDB::bind_method(D_METHOD("build_surface"), &NativeLiquidSolver::build_surface);
+        ClassDB::bind_method(D_METHOD("sample_floor", "point"), &NativeLiquidSolver::floor_height);
         ClassDB::bind_method(D_METHOD("set_particle_state", "index", "position", "velocity"), &NativeLiquidSolver::set_particle_state);
     }
 public:
     void configure(const Dictionary &cfg) {
-        floors.clear(); elevations.clear(); tiles.clear(); walls.clear();
+        floors.clear(); elevations.clear(); tiles.clear(); walls.clear(); polygons.clear(); voids.clear(); openings.clear();
         Array fs = cfg["regions"], ts = cfg["tiles"], ws = cfg["walls"];
         PackedFloat32Array heights = cfg["elevations"];
         for (int i = 0; i < fs.size(); ++i) { floors.push_back(Rect2(fs[i])); elevations.push_back(i < heights.size() ? heights[i] : 0); }
         for (int i = 0; i < ts.size(); ++i) { Dictionary t = ts[i]; tiles.push_back(Tile{Rect2(t["bounds"]), float(t["height"])}); }
         for (int i = 0; i < ws.size(); ++i) { PackedFloat32Array w = ws[i]; std::array<float,6> a{}; for (int j = 0; j < 6; ++j) a[j] = w[j]; walls.push_back(a); }
+        curved=cfg.has("curved") && bool(cfg["curved"]);
+        if (cfg.has("polygons")) {
+            Array ps=cfg["polygons"]; PackedFloat32Array hs=cfg["polygon_heights"];
+            for (int i=0;i<ps.size();++i) polygons.push_back(read_polygon(PackedVector2Array(ps[i]),hs[i]));
+        }
+        if (cfg.has("voids")) { Array vs=cfg["voids"]; for (int i=0;i<vs.size();++i) voids.push_back(Rect2(vs[i])); }
+        if (cfg.has("openings")) { Array os=cfg["openings"]; for (int i=0;i<os.size();++i) openings.push_back(read_polygon(PackedVector2Array(os[i]))); }
         bounds = cfg["bounds"]; reservoir = cfg.has("reservoir") ? Rect2(cfg["reservoir"]) : Rect2(cfg["spawn"]); goal = cfg["goal"];
         count = int(cfg["count"]); top = float(cfg["top"]); base = float(cfg["base"]); spacing = float(cfg["spacing"]); radius = float(cfg["radius"]);
-        wall_normals.clear();
+        lowest_floor=top;
+        for (auto height:elevations) lowest_floor=std::min(lowest_floor,height);
+        for (const auto &p:polygons) lowest_floor=std::min(lowest_floor,p.height);
+        wall_normals.clear(); wall_indices.clear();
         for (const auto &wall : walls) {
             Vector2 midpoint((wall[0]+wall[2])*.5f,(wall[1]+wall[3])*.5f);
             bool x_face = std::abs(wall[0]-wall[2]) < .0001f;
-            Vector2 axis = x_face ? Vector2(1,0) : Vector2(0,1);
+            Vector2 axis = curved ? Vector2(-(wall[3]-wall[1]),wall[2]-wall[0]).normalized() : (x_face ? Vector2(1,0) : Vector2(0,1));
             float sign = floor_height(midpoint+axis*.001f) < floor_height(midpoint-axis*.001f) ? 1.f : -1.f;
             wall_normals.push_back(Vector3(axis.x*sign,0,axis.y*sign));
+            wall_indices.push_back(int(wall_indices.size()));
         }
         mass_density = float(cfg["rho"]); max_speed = float(cfg["max_speed"]); drag = float(cfg["drag"]); viscosity = float(cfg["viscosity"]);
         surface_tension = cfg.has("surface_tension") ? float(cfg["surface_tension"]) : .072f;
         required = float(cfg["required"]); hold_seconds = float(cfg["hold"]);
         flow_speed = cfg.has("flow_speed") ? clampf(float(cfg["flow_speed"]), .5f, 1.5f) : 1.15f;
         ERR_FAIL_COND(count < 1 || count > 32768 || spacing <= 0 || floors.empty());
-        origin = Vector3(std::floor((bounds.position.x - .49f) / cell_size) * cell_size, std::floor((base - .7f) / cell_size) * cell_size, std::floor((bounds.position.y - .49f) / cell_size) * cell_size);
+        origin = Vector3(std::floor((bounds.position.x - .49f) / cell_size) * cell_size, std::floor((base - (curved ? 1.f : .7f)) / cell_size) * cell_size, std::floor((bounds.position.y - .49f) / cell_size) * cell_size);
         nx = int(std::ceil((bounds.get_end().x + .49f - origin.x) / cell_size)) + 2;
         nz = int(std::ceil((bounds.get_end().y + .49f - origin.z) / cell_size)) + 2;
         ny = int(std::ceil((top + 1.2f - origin.y) / cell_size)) + 2;
         plane = nx * nz; total = plane * ny;
+        wall_bins.clear();
+        if (curved) {
+            wall_bins.resize(plane);
+            for (size_t i=0;i<walls.size();++i) {
+                const auto &w=walls[i];
+                int x0=std::max(0,int(std::floor((std::min(w[0],w[2])-.15f-origin.x)/cell_size)));
+                int x1=std::min(nx-1,int(std::floor((std::max(w[0],w[2])+.15f-origin.x)/cell_size)));
+                int z0=std::max(0,int(std::floor((std::min(w[1],w[3])-.15f-origin.z)/cell_size)));
+                int z1=std::min(nz-1,int(std::floor((std::max(w[1],w[3])+.15f-origin.z)/cell_size)));
+                for (int z=z0;z<=z1;++z) for (int x=x0;x<=x1;++x) wall_bins[z*nx+x].push_back(int(i));
+            }
+        }
         solid.assign(total, 1); vertical_wall.assign(total, 1); liquid_id.assign(total, -1); marker_count.assign(total, 0); liquid_cells.clear();
         capillary_color.assign(total,0); capillary_normal.assign(total,Vector3()); capillary_mark.assign(total,0); capillary_cells.clear();
+        std::vector<float> floor_cache(plane);
+        for (int z=0;z<nz;++z) for (int x=0;x<nx;++x) floor_cache[z*nx+x]=floor_height(Vector2(origin.x+(x+.5f)*cell_size,origin.z+(z+.5f)*cell_size));
         for (int y = 1; y < ny - 1; ++y) for (int z = 1; z < nz - 1; ++z) for (int x = 1; x < nx - 1; ++x) {
             Vector3 p = origin + Vector3(x + .5f, y + .5f, z + .5f) * cell_size;
             bool roof = reservoir.has_point(Vector2(p.x,p.z)) && p.y >= top + .07f && p.y < top + .11f;
             bool header = p.x >= reservoir.position.x && p.x <= reservoir.get_end().x && std::abs(p.z - reservoir.get_end().y) < .035f && p.y > elevations[0] + .35f && p.y < top + .11f;
-            solid[index(x,y,z)] = p.y < floor_height(Vector2(p.x,p.z)) || roof || header;
+            solid[index(x,y,z)] = p.y < floor_cache[z*nx+x] || roof || header;
         }
         for (int y = 1; y < ny - 1; ++y) for (int z = 1; z < nz - 1; ++z) for (int x = 1; x < nx - 1; ++x) {
             int i = index(x,y,z); vertical_wall[i] = solid[i] || solid[i-1] || solid[i+1] || solid[i-nx] || solid[i+nx];
@@ -630,7 +810,7 @@ public:
     }
     void reset() {
         clear_grid(); positions.resize(count); velocities.assign(count,Vector3()); active.assign(count,1);
-        over_rim.assign(count,0); escaped.assign(count,0); spill_points.clear();
+        over_rim.assign(count,0); escaped.assign(count,0); through_void.assign(count,0); loss_reason.assign(count,0); spill_points.clear();
         Rect2 water = reservoir.grow(-radius - .002f);
         int columns = std::max(1,int(std::round(water.size.x / spacing))), rows = std::max(1,int(std::round(water.size.y / spacing)));
         int layers = std::max(1,int(std::ceil(float(count) / (columns * rows)))), slots = columns * rows * layers;
@@ -642,7 +822,7 @@ public:
             positions[i] = Vector3(px,py,pz);
         }
         set_gate_opening(0); gate_controlled = false;
-        fraction = held = 0; lost = delivered = lost_without_rim = 0; completed = false; reservoir_open = false; maximum_divergence = 0; pressure_steps = 0;
+        fraction = held = 0; lost = delivered = lost_without_rim = lost_in_void = 0; completed = false; reservoir_open = false; maximum_divergence = 0; pressure_steps = 0;
         liquid_volume = count * spacing * spacing * spacing;
     }
     void step(double delta, Vector2 tilt) {
@@ -697,6 +877,7 @@ public:
         if (count) { std::copy(positions.begin(),positions.end(),p.ptrw()); std::copy(velocities.begin(),velocities.end(),v.ptrw()); std::copy(active.begin(),active.end(),a.ptrw()); }
         Dictionary d; d["positions"] = p; d["velocities"] = v; d["active"] = a; d["lost"] = lost;
         d["delivered"] = delivered; d["remaining"] = count - lost - delivered; d["lost_without_rim"] = lost_without_rim;
+        d["lost_in_void"] = lost_in_void;
         PackedVector3Array spills;
         for (auto point : spill_points) spills.push_back(point);
         d["spills"] = spills;
@@ -705,7 +886,11 @@ public:
         return d;
     }
     Dictionary build_surface() { return make_surface(); }
-    void set_particle_state(int i, Vector3 p, Vector3 v) { ERR_FAIL_INDEX(i,count); positions[i] = p; velocities[i] = v; if (!active[i]) { active[i] = 1; --lost; } }
+    void set_particle_state(int i, Vector3 p, Vector3 v) {
+        ERR_FAIL_INDEX(i,count); positions[i]=p; velocities[i]=v;
+        if (!active[i]) { active[i]=1; --lost; if (loss_reason[i]==2) --lost_in_void; if (loss_reason[i]==3) --lost_without_rim; }
+        over_rim[i]=p.y>=top-radius; through_void[i]=0; loss_reason[i]=0; escaped[i]=0;
+    }
 };
 
 void initialize_hydrologic(ModuleInitializationLevel level) { if (level == MODULE_INITIALIZATION_LEVEL_SCENE) ClassDB::register_class<NativeLiquidSolver>(); }

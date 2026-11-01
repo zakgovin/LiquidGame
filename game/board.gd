@@ -3,9 +3,17 @@ extends Node3D
 ## Functional transparent channels: physical rims stay legible while water
 ## remains visible through the walls and the top of every raised obstacle.
 
-var _steel := _material(Color("617b8a"), 0.65)
-var _base := _material(Color("a7bac5"), 0.9)
-var _rim := _material(Color("789eaf"), 0.65)
+var _steel := _material(Color("657078"), 0.55)
+var _base := _material(Color("abb3b0"), 0.9)
+var _rim := _material(Color("78868a"), 0.55)
+var foundation := _material(Color("b7b0a1"), 0.9)
+var floor_materials: Array[StandardMaterial3D] = []
+var contact_material := ShaderMaterial.new()
+var contact_bands: int = 0
+var open_edges: int = 0
+var _slab_edge := _material(Color("918676"), 0.85)
+var _well := _material(Color("253139"), 0.95)
+var _lowest_floor: float = 0.0
 var _step := ShaderMaterial.new()
 var _red := _material(Color("ec5448"), 0.6)
 var _glass: ShaderMaterial
@@ -27,6 +35,7 @@ var _spill_cues: Array[MeshInstance3D] = []
 var _spill_ages: Array[float] = []
 var _spill_material: StandardMaterial3D
 var _batches: Dictionary = {}
+var _caps: Array[Dictionary] = []
 
 
 static func _material(color: Color, roughness: float) -> StandardMaterial3D:
@@ -45,21 +54,39 @@ func _glass_material(alpha: float) -> ShaderMaterial:
 
 
 func build(level: LevelDefinition) -> void:
-	_glass = _glass_material(0.13)
-	_glass_edge = _glass_material(0.42)
+	_glass = _glass_material(0.065)
+	_glass_edge = _glass_material(0.24)
+	contact_material.shader = preload("res://assets/materials/contact.gdshader")
+	contact_material.render_priority = -1
 	_step.shader = preload("res://assets/materials/hazard.gdshader")
 	_step_lower.shader = _step.shader
 	_step_lower.set_shader_parameter("stripe_direction", -1.0)
-	var floors: Array[Material] = []
+	var heights: Array[float] = []
 	for i: int in range(level.floor_regions.size()):
-		floors.append(_material(Color("e1e7e5").lerp(Color("b5c3c2"), float(i) / 5.0), 0.85))
+		if not heights.has(level.elevation(i)): heights.append(level.elevation(i))
+	for height: float in level.channel_heights():
+		if not heights.has(height): heights.append(height)
+	heights.sort()
+	_lowest_floor = heights[0]
+	var floors := {}
+	for height: float in heights:
+		var depth := (heights[-1] - height) / maxf(0.01, heights[-1] - heights[0])
+		var material := _material(Color("e8dfca").lerp(Color("b9b09f"), depth * 0.5), 0.92)
+		floors[roundi(height * 10000)] = material
+		floor_materials.append(material)
+	if not level.channel_curves.is_empty() or not level.void_regions.is_empty():
+		for face: Dictionary in level.floor_faces(): _polygon(face.polygon, face.height, Vector3.UP, floors[roundi(face.height * 10000)])
+		for polygon: PackedVector2Array in level.glass_patches():
+			_polygon(polygon, level.board_top, Vector3.UP, _glass)
+			_polygon(polygon, level.base_height, Vector3.DOWN, _glass)
+			glass_faces += 2
+		for polygon: PackedVector2Array in level.base_patches(): _slab(polygon, level.base_height - 0.005, 0.08, foundation)
+		for polygon: PackedVector2Array in level.opening_polygons(): _drain(polygon, level.base_height)
 	for tile: Dictionary in level.terrain_tiles():
 		var r: Rect2 = tile.bounds
 		var y: float = tile.height
 		if tile.channel:
-			var material: Material = floors[0]
-			for i: int in range(level.floor_regions.size()):
-				if absf(level.elevation(i) - y) < 0.001: material = floors[i]
+			var material: Material = floors[roundi(y * 10000)]
 			var plate := _box(Vector3(r.size.x, 0.06, r.size.y), Vector3(r.get_center().x, y - 0.03, r.get_center().y), material)
 			plate.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		else:
@@ -75,18 +102,27 @@ func build(level: LevelDefinition) -> void:
 		var normal := Vector2(-(b.y - a.y), b.x - a.x).normalized()
 		if level.floor_height(midpoint + normal * 0.002) > level.floor_height(midpoint - normal * 0.002): normal = -normal
 		var step := high < level.board_top - 0.001
-		_quad(Vector3(a.x, low, a.y), Vector3(b.x, low, b.y), Vector3(b.x, high, b.y), Vector3(a.x, high, a.y), Vector3(normal.x, 0, normal.y), _step if step else _glass)
-		if step:
+		var opening := level.is_void(midpoint + normal * 0.01) or level.is_void(midpoint - normal * 0.01)
+		var edge_material: Material = _slab_edge if step and opening else (_step if step else _glass)
+		_quad(Vector3(a.x, low, a.y), Vector3(b.x, low, b.y), Vector3(b.x, high, b.y), Vector3(a.x, high, a.y), Vector3(normal.x, 0, normal.y), edge_material)
+		if step and opening:
+			var n := Vector3(normal.x, 0, normal.y)
+			var ah := Vector3(a.x, high + 0.006, a.y)
+			var bh := Vector3(b.x, high + 0.006, b.y)
+			_quad(ah - n * 0.10, bh - n * 0.10, bh, ah, Vector3.UP, _step_lower if high <= _lowest_floor + 0.001 else _step)
+			open_edges += 1
+		elif step:
 			_mark_step(a, b, low, high, normal)
 		else:
 			glass_faces += 1
-			var cap := _box(Vector3(a.distance_to(b), 0.035, 0.055), Vector3(midpoint.x, high + 0.012, midpoint.y), _glass_edge)
-			cap.rotation.y = -atan2(b.y - a.y, b.x - a.x)
-			cap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			_caps.append({"a": a, "b": b, "height": high, "normal": normal})
+		if not opening and is_finite(level.floor_height(midpoint + normal * 0.06)):
+			_contact_strip(a, b, low, normal, 0.17 if not step else 0.11)
 
+	_finish_caps()
 	_finish_mesh()
-	var baseplate := _box(Vector3(level.board_bounds.size.x + 0.08, 0.08, level.board_bounds.size.y + 0.08), Vector3(level.board_bounds.get_center().x, level.base_height - 0.045, level.board_bounds.get_center().y), _material(Color("b4c8cf"), 0.55))
-	baseplate.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if level.channel_curves.is_empty() and level.void_regions.is_empty():
+		_box(Vector3(level.board_bounds.size.x + 0.08, 0.08, level.board_bounds.size.y + 0.08), Vector3(level.board_bounds.get_center().x, level.base_height - 0.045, level.board_bounds.get_center().y), foundation)
 	var goal := level.goal
 	var top := level.board_top + 0.026
 	var rim := _box(Vector3(goal.size.x + 0.15, 0.04, 0.10), Vector3(goal.get_center().x, top, goal.end.y), _red)
@@ -96,6 +132,84 @@ func build(level: LevelDefinition) -> void:
 		side.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_build_reservoir(level)
 	_build_spill_cues()
+
+
+func _finish_caps() -> void:
+	var joins := {}
+	for edge: Dictionary in _caps:
+		for point: Vector2 in [edge.a, edge.b]:
+			var key := Vector3i(roundi(point.x * 10000), roundi(edge.height * 10000), roundi(point.y * 10000))
+			joins[key] = (joins.get(key, Vector2.ZERO) as Vector2) + edge.normal
+	for edge: Dictionary in _caps:
+		var offsets: Array[Vector2] = []
+		for point: Vector2 in [edge.a, edge.b]:
+			var key := Vector3i(roundi(point.x * 10000), roundi(edge.height * 10000), roundi(point.y * 10000))
+			var normal: Vector2 = joins[key]
+			if normal.length_squared() < 0.01: normal = edge.normal
+			normal = normal.normalized()
+			offsets.append(normal * (0.0275 / maxf(0.5, normal.dot(edge.normal))))
+		var a: Vector2 = edge.a
+		var b: Vector2 = edge.b
+		var al := a - offsets[0]
+		var ar := a + offsets[0]
+		var bl := b - offsets[1]
+		var br := b + offsets[1]
+		var top: float = edge.height + 0.029
+		_quad(Vector3(al.x, top, al.y), Vector3(bl.x, top, bl.y), Vector3(br.x, top, br.y), Vector3(ar.x, top, ar.y), Vector3.UP, _glass_edge)
+		var n := Vector3(edge.normal.x, 0, edge.normal.y)
+		_quad(Vector3(ar.x, top - 0.035, ar.y), Vector3(br.x, top - 0.035, br.y), Vector3(br.x, top, br.y), Vector3(ar.x, top, ar.y), n, _glass_edge)
+		_quad(Vector3(al.x, top - 0.035, al.y), Vector3(bl.x, top - 0.035, bl.y), Vector3(bl.x, top, bl.y), Vector3(al.x, top, al.y), -n, _glass_edge)
+
+
+func _polygon(points: PackedVector2Array, y: float, normal: Vector3, material: Material) -> void:
+	var indices := Geometry2D.triangulate_polygon(points)
+	for i: int in range(0, indices.size(), 3):
+		var a := points[indices[i]]
+		var b := points[indices[i + 1]]
+		var c := points[indices[i + 2]]
+		_triangle(Vector3(a.x, y, a.y), Vector3(b.x, y, b.y), Vector3(c.x, y, c.y), normal, material)
+
+
+func _slab(points: PackedVector2Array, top: float, depth: float, material: Material) -> void:
+	_polygon(points, top, Vector3.UP, material)
+	_polygon(points, top - depth, Vector3.DOWN, material)
+	for i: int in range(points.size()):
+		var a := points[i]
+		var b := points[(i + 1) % points.size()]
+		var n := Vector2(b.y - a.y, a.x - b.x).normalized()
+		_quad(Vector3(a.x, top - depth, a.y), Vector3(b.x, top - depth, b.y), Vector3(b.x, top, b.y), Vector3(a.x, top, a.y), Vector3(n.x, 0, n.y), material)
+
+
+func _drain(points: PackedVector2Array, base: float) -> void:
+	_polygon(points, base - 0.66, Vector3.UP, _well)
+	for i: int in range(points.size()):
+		var a := points[i]
+		var b := points[(i + 1) % points.size()]
+		var n := Vector2(-(b.y - a.y), b.x - a.x).normalized()
+		if not Geometry2D.is_point_in_polygon((a + b) * 0.5 + n * 0.002, points): n = -n
+		_quad(Vector3(a.x, base - 0.66, a.y), Vector3(b.x, base - 0.66, b.y), Vector3(b.x, base - 0.005, b.y), Vector3(a.x, base - 0.005, a.y), Vector3(n.x, 0, n.y), _well)
+
+
+func _contact_strip(a: Vector2, b: Vector2, height: float, normal: Vector2, opacity: float) -> void:
+	if not _batches.has(contact_material):
+		var builder := SurfaceTool.new()
+		builder.begin(Mesh.PRIMITIVE_TRIANGLES)
+		builder.set_material(contact_material)
+		_batches[contact_material] = builder
+	var builder: SurfaceTool = _batches[contact_material]
+	var n := Vector3(normal.x, 0, normal.y) * 0.13
+	var p := Vector3(a.x, height + 0.005, a.y)
+	var q := Vector3(b.x, height + 0.005, b.y)
+	var points: Array[Vector3] = [p, q, q + n, p, q + n, p + n]
+	var alphas: Array[float] = [opacity, opacity, 0.0, opacity, 0.0, 0.0]
+	if (q - p).cross(n).dot(Vector3.UP) > 0.0:
+		points = [p, q + n, q, p, p + n, q + n]
+		alphas = [opacity, 0.0, opacity, opacity, 0.0, 0.0]
+	for i: int in range(points.size()):
+		builder.set_color(Color(1, 1, 1, alphas[i]))
+		builder.set_normal(Vector3.UP)
+		builder.add_vertex(points[i])
+	contact_bands += 1
 
 
 func _mark_step(a: Vector2, b: Vector2, low: float, high: float, downhill: Vector2) -> void:
@@ -109,7 +223,10 @@ func _mark_step(a: Vector2, b: Vector2, low: float, high: float, downhill: Vecto
 	_quad(ah - n * 0.24, bh - n * 0.24, bh, ah, Vector3.UP, _step)
 	_quad(al, bl, bl + n * 0.20, al + n * 0.20, Vector3.UP, _step_lower)
 	var tangent := Vector3(b.x - a.x, 0, b.y - a.y).normalized()
-	for fraction: float in [0.33, 0.67]:
+	var arrows: Array[float] = []
+	if a.distance_to(b) > 0.75: arrows.assign([0.33, 0.67])
+	elif a.distance_to(b) > 0.40: arrows.append(0.5)
+	for fraction: float in arrows:
 		var centre := ah.lerp(bh, fraction) - n * 0.13 + Vector3.UP * 0.003
 		_triangle(centre + n * 0.095, centre - n * 0.08 - tangent * 0.075, centre - n * 0.08 + tangent * 0.075, Vector3.UP, _arrow_dark)
 		centre += Vector3.UP * 0.002

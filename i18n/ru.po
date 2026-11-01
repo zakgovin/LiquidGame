@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.10.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.11.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "ГИДРОЛОГИКА"
@@ -152,7 +152,7 @@ msgid "LEVEL_SWITCHBACKS"
 msgstr "Повороты"
 
 msgid "SWITCHBACKS_ROUTE"
-msgstr "Три канала и два разворота в разные стороны.\nПроведите поток в дальний сосуд."
+msgstr "Плавные изгибы и открытый перелив.\nМеняйте наклон плавно, чтобы не потерять воду в разрыве."
 
 msgid "NEXT_LEVEL"
 msgstr "Следующий уровень"

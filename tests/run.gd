@@ -2,6 +2,7 @@ extends SceneTree
 
 const LEVEL: LevelDefinition = preload("res://resources/first_level.tres")
 const SECOND: LevelDefinition = preload("res://resources/second_level.tres")
+const CURVED_COURSE = preload("res://tests/curved_course.gd")
 const WATER: LiquidProfile = preload("res://resources/water.tres")
 const CIRCUIT: Array[Vector2] = [Vector2.DOWN, Vector2(1, 0.5), Vector2(0.5, -1), Vector2(-1, -0.5), Vector2(-0.4, 1), Vector2.DOWN]
 var failures: int = 0
@@ -69,26 +70,98 @@ func release_water(game: Node) -> void:
 
 
 func channels_visible(game: Node) -> bool:
-	# Check the line of sight from each channel centre towards the camera.
-	# A low camera lets a tall near wall cover the floor even with glass.
-	var toward_camera: Vector3 = game.turntable.basis.inverse() * game.camera.global_basis.z
-	for region: Rect2 in game.level.floor_regions:
-		var centre := region.get_center()
-		var point := Vector3(centre.x, game.level.floor_height(centre) + 0.01, centre.y)
+	var toward: Vector3 = game.turntable.basis.inverse() * game.camera.global_basis.z
+	var samples := PackedVector2Array()
+	for region: Rect2 in game.level.floor_regions: samples.append(region.get_center())
+	for curve: Curve2D in game.level.channel_curves:
+		for i: int in range(1, ceili(curve.get_baked_length() / 0.4)):
+			var sample := curve.sample_baked(i * 0.4)
+			if not game.level.goal.has_point(sample): samples.append(sample)
+	for sample: Vector2 in samples:
+		var point := Vector3(sample.x, game.level.floor_height(sample) + 0.01, sample.y)
 		for wall: PackedFloat32Array in game.level.wall_segments():
-			var x_face := absf(wall[0] - wall[2]) < 0.0001
-			var component := toward_camera.x if x_face else toward_camera.z
-			if absf(component) < 0.000001: continue
-			var distance := ((wall[0] - point.x) if x_face else (wall[1] - point.z)) / component
+			var a := Vector2(wall[0], wall[1])
+			var edge := Vector2(wall[2], wall[3]) - a
+			var normal := Vector2(-edge.y, edge.x)
+			var denominator := normal.dot(Vector2(toward.x, toward.z))
+			if absf(denominator) < 0.000001: continue
+			var distance := normal.dot(a - sample) / denominator
 			if distance <= 0.0001: continue
-			var hit := point + toward_camera * distance
-			var inside := hit.z >= wall[1] and hit.z <= wall[3] if x_face else hit.x >= wall[0] and hit.x <= wall[2]
-			if inside and hit.y > wall[4] and hit.y < wall[5]: return false
+			var hit := point + toward * distance
+			var along := (Vector2(hit.x, hit.z) - a).dot(edge) / edge.length_squared()
+			if along >= 0.0 and along <= 1.0 and hit.y > wall[4] and hit.y < wall[5]: return false
 	return true
+
+
+func check_curved_terrain() -> void:
+	var fluid := LiquidSimulation.new(SECOND, WATER)
+	var mismatches := 0
+	for iz: int in range(70):
+		for ix: int in range(45):
+			var sample := Vector2(-2.91 + ix * 0.131, -4.85 + iz * 0.139)
+			var rendered := SECOND.floor_height(sample)
+			var physical := float(fluid.native_solver().call("sample_floor", sample))
+			if is_finite(rendered) != is_finite(physical) or (is_finite(rendered) and absf(rendered - physical) > 0.0001): mismatches += 1
+	check(mismatches == 0, "Native curved terrain matches the authored floors and cutout at 3150 points")
+	var oblique := 0
+	for wall: PackedFloat32Array in SECOND.wall_segments():
+		if absf(wall[0] - wall[2]) > 0.001 and absf(wall[1] - wall[3]) > 0.001: oblique += 1
+	check(SECOND.channel_curves.size() == 4 and oblique > 200, "The second level has genuine curved walls instead of a rectangular approximation")
+	var mismatched_area := 0.0
+	for face: Dictionary in SECOND.floor_faces():
+		var indices := Geometry2D.triangulate_polygon(face.polygon)
+		for i: int in range(0, indices.size(), 3):
+			var centre: Vector2 = (face.polygon[indices[i]] + face.polygon[indices[i + 1]] + face.polygon[indices[i + 2]]) / 3.0
+			if absf(SECOND.floor_height(centre) - float(face.height)) >= 0.001:
+				mismatched_area += absf((face.polygon[indices[i + 1]] - face.polygon[indices[i]]).cross(face.polygon[indices[i + 2]] - face.polygon[indices[i]])) * 0.5
+	check(mismatched_area < 0.00001, "Visible curved floors match their physical height within polygon-clipping precision")
+	var gap := Vector2(-0.06, 2.25)
+	var open := not is_finite(SECOND.floor_height(gap))
+	var visible_open := false
+	for polygon: PackedVector2Array in SECOND.opening_polygons(): visible_open = visible_open or Geometry2D.is_point_in_polygon(gap, polygon)
+	for polygon: PackedVector2Array in SECOND.base_patches(): open = open and not Geometry2D.is_point_in_polygon(gap, polygon)
+	for polygon: PackedVector2Array in SECOND.glass_patches(): open = open and not Geometry2D.is_point_in_polygon(gap, polygon)
+	check(open and visible_open, "The transfer gap has no hidden floor, glass bridge or base plate")
+	fluid.set_gate_opening(0.0)
+	check(advance(fluid, 180, Vector2.ZERO) and fluid.lost_count == 0, "The curved level retains all water in its closed source")
+	fluid = null
+	var one := SECOND.duplicate() as LevelDefinition
+	one.particle_count = 1
+	var drop := LiquidSimulation.new(one, WATER)
+	drop.set_gate_opening(1.0)
+	drop.set_particle(0, Vector3(gap.x, 0.16, gap.y), Vector3.ZERO)
+	advance(drop, 90, Vector2.ZERO)
+	check(drop.lost_count == 1 and drop.lost_in_void == 1 and drop.lost_without_rim == 0 and intact(drop), "Water falls through the real opening and its loss remains accounted for")
+	drop.reset()
+	drop.set_particle(0, Vector3(-0.25, 0.18, 2.25), Vector3(1.8, 0, 0))
+	advance(drop, 30, Vector2.RIGHT)
+	check(drop.active[0] == 1 and drop.positions[0].x > 0.03 and drop.positions[0].y >= -0.141, "A steady jet crosses the opening and lands on the lower catcher")
+
+
+func check_curved_tilt(game: Node) -> void:
+	game._select_level(1)
+	game.controls.use_rotation = false
+	game.controls.sensitivity = 1.0
+	game._restart()
+	Input.set_gravity(Vector3(0, 0, 9.81))
+	game._release()
+	var angle := PI / 2.0
+	for stage: int in range(CURVED_COURSE.DIRECTIONS.size()):
+		for frame: int in range(CURVED_COURSE.FRAMES[stage]):
+			angle = rotate_toward(angle, CURVED_COURSE.DIRECTIONS[stage].angle(), CURVED_COURSE.TURN_SPEED / 60.0)
+			var sensor: Vector2 = game.world_to_input(Vector2.from_angle(angle)) * game.controls.FULL_ANGLE
+			var gx := sin(sensor.x)
+			var gy := -sin(sensor.y)
+			Input.set_gravity(Vector3(gx, gy, sqrt(maxf(0, 1.0 - gx * gx - gy * gy))) * 9.81)
+			game._physics_process(1.0 / 60.0)
+	print("Curved phone-tilt delivered fraction: ", game.simulation.goal_fraction, "; opening losses: ", game.simulation.lost_in_void)
+	check(game.screen == game.Screen.WON and game.simulation.goal_fraction >= 0.8 and game.simulation.lost_without_rim == 0 and intact(game.simulation), "Sensor input, filtering and visual feedback can complete the curved level with conserved mass")
+	Input.set_gravity(Vector3.ZERO)
 
 
 func _run() -> void:
 	var begin := Time.get_ticks_msec()
+	check_curved_terrain()
 	var fluid := LiquidSimulation.new(LEVEL, WATER)
 	check(fluid.native_solver() != null, "Production uses the native 3D solver")
 	check(intact(fluid) and fluid.goal_fraction == 0.0, "Water spawns with all parcels accounted for and no false victory")
@@ -137,10 +210,30 @@ func _run() -> void:
 	print("Second-level short-route delivered fraction: ", second_fluid.goal_fraction)
 	check(not second_fluid.completed and second_fluid.goal_fraction < SECOND.required_fraction, "The short down/right/down route cannot complete the second level")
 	second_fluid.reset()
-	for direction: Vector2 in [Vector2.DOWN, Vector2(1, 0.3), Vector2.UP, Vector2(1, -0.3), Vector2.DOWN]:
-		check(advance(second_fluid, 600, direction.normalized()), "Second-level switchback preserves accounted mass through " + str(direction))
-	print("Second-level physical delivered fraction: ", second_fluid.goal_fraction, "; lost parcels: ", second_fluid.lost_count)
-	check(second_fluid.completed and second_fluid.goal_fraction >= 0.8 and second_fluid.lost_without_rim == 0, "Both opposite switchbacks complete with at least eighty percent and no terrain leaks")
+	var course_angle := PI / 2.0
+	var course_frame := 0
+	for stage: int in range(CURVED_COURSE.DIRECTIONS.size()):
+		for frame: int in range(CURVED_COURSE.FRAMES[stage]):
+			course_angle = rotate_toward(course_angle, CURVED_COURSE.DIRECTIONS[stage].angle(), CURVED_COURSE.TURN_SPEED / 60.0)
+			second_fluid.set_gate_opening(minf(float(course_frame) / 12.0, 1.0))
+			second_fluid.step(1.0 / 60.0, Vector2.from_angle(course_angle))
+			course_frame += 1
+		check(intact(second_fluid), "Curved course preserves accounted mass through phase " + str(stage))
+	print("Curved-course delivered fraction: ", second_fluid.goal_fraction, "; opening losses: ", second_fluid.lost_in_void)
+	check(second_fluid.completed and second_fluid.goal_fraction >= 0.8 and second_fluid.lost_without_rim == 0, "Smooth steering completes the curves and open transfer without terrain leaks")
+	second_fluid.reset()
+	course_angle = PI / 2.0
+	course_frame = 0
+	var rough_directions: Array[Vector2] = [Vector2.DOWN, Vector2(1, 0.1), Vector2.DOWN, Vector2(-1, -0.18), Vector2.DOWN, Vector2.RIGHT, Vector2.DOWN]
+	var rough_frames: Array[int] = [100, 140, 60, 190, 130, 250, 400]
+	for stage: int in range(rough_directions.size()):
+		for frame: int in range(rough_frames[stage]):
+			course_angle = rotate_toward(course_angle, rough_directions[stage].angle(), CURVED_COURSE.TURN_SPEED / 60.0)
+			second_fluid.set_gate_opening(minf(float(course_frame) / 12.0, 1.0))
+			second_fluid.step(1.0 / 60.0, Vector2.from_angle(course_angle))
+			course_frame += 1
+	print("Late-turn opening losses: ", second_fluid.lost_in_void, "; delivered: ", second_fluid.goal_fraction)
+	check(not second_fluid.completed and second_fluid.is_unwinnable() and second_fluid.lost_in_void > SECOND.particle_count * 0.2 and second_fluid.lost_without_rim == 0 and intact(second_fluid), "A late turn spills the stream through the real gap and makes the attempt unwinnable")
 	second_fluid = null
 	fluid.reset()
 	check(not fluid.completed and fluid.held_seconds == 0.0 and fluid.lost_count == 0, "Restart restores all water and clears completion")
@@ -489,6 +582,7 @@ func _run() -> void:
 	game.sounds.play_event(&"complete")
 	check(heard.size() == event_count, "Muted feedback stays silent")
 	game.sounds.set_enabled(true)
+	check_curved_tilt(game)
 	game._save_settings()
 	# Flush audio requests produced by synchronous lifecycle checks before
 	# stopping the mixer voices and destroying their players.

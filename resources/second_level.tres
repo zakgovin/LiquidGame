@@ -1,21 +1,48 @@
-[gd_resource type="Resource" script_class="LevelDefinition" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="LevelDefinition" format=3]
 
-[ext_resource type="Script" path="res://game/level_definition.gd" id="1"]
+[ext_resource type="Script" path="res://game/level_definition.gd" id="1_pc6uf"]
+
+[sub_resource type="Curve2D" id="Curve2D_e13wu"]
+bake_interval = 0.08
+_data = {
+"points": PackedVector2Array(0, 0, 0, 0.25, -1.9, -3.1, 0, -0.2, 0, 0.45, -1.9, -2.5, -0.5, 0, 0.5, 0, -0.8, -1.9, -0.45, 0, 0.35, 0, 0.8, -1.9, -0.25, -0.1, 0, 0, 1.45, -1.8)
+}
+point_count = 5
+
+[sub_resource type="Curve2D" id="Curve2D_6pxmv"]
+bake_interval = 0.08
+_data = {
+"points": PackedVector2Array(0, 0, 0.35, 0.15, 1.35, -1.85, 0, -0.4, 0, 0.4, 1.95, -0.8, 0.4, 0, -0.45, 0, 1.55, 0.35, 0.45, 0.2, -0.45, -0.2, 0.3, -0.35, 0.4, 0, 0, 0, -1.45, -0.4)
+}
+point_count = 5
+
+[sub_resource type="Curve2D" id="Curve2D_ovjqn"]
+bake_interval = 0.08
+_data = {
+"points": PackedVector2Array(0, 0, -0.4, 0, -1.35, -0.4, 0, -0.4, 0, 0.45, -1.95, 0.5, -0.4, -0.25, 0.4, 0, -1.65, 2.25, -0.35, 0, 0.3, 0, -0.8, 2.25, -0.3, 0, 0, 0, -0.15, 2.25)
+}
+point_count = 5
+
+[sub_resource type="Curve2D" id="Curve2D_ssw2f"]
+bake_interval = 0.08
+_data = {
+"points": PackedVector2Array(0, 0, 0.45, 0, 0.03, 2.25, -0.4, -0.1, 0.35, 0.1, 1.35, 2.4, 0, -0.4, 0, 0.4, 1.9, 3.15, 0, -0.4, 0, 0, 1.9, 4.25)
+}
+point_count = 4
 
 [resource]
-script = ExtResource("1")
+script = ExtResource("1_pc6uf")
 title = "LEVEL_SWITCHBACKS"
 description = "SWITCHBACKS_ROUTE"
-floor_regions = Array[Rect2]([Rect2(-2.6, -4.5, 1.4, 9), Rect2(-2.6, 3.1, 3.3, 1.4), Rect2(-0.7, -4.5, 1.4, 9), Rect2(-0.7, -4.5, 3.3, 1.4), Rect2(1.2, -4.5, 1.4, 9)])
-spawn = Rect2(-2.5, -4.3, 1.2, 2)
-goal = Rect2(1.2, 2.4, 1.4, 2.1)
-particle_count = 8192
-required_fraction = 0.8
-hold_seconds = 0.75
-board_bounds = Rect2(-2.95, -4.9, 5.9, 9.8)
-route = PackedVector2Array(-1.9, -3.4, -1.9, 3.8, 0, 3.8, 0, -3.8, 1.9, -3.8, 1.9, 3.8)
-floor_elevations = PackedFloat32Array(0.42, 0.28, 0.14, 0, -0.14)
-board_top = 1.26
-base_height = -0.56
-reservoir_bounds = Rect2(-2.6, -4.5, 1.4, 1.8)
+floor_regions = Array[Rect2]([Rect2(-2.6, -4.5, 1.4, 1.8), Rect2(1, 3.15, 1.8, 1.35)])
+floor_elevations = PackedFloat32Array(0.42, -0.14)
+channel_curves = Array[Curve2D]([SubResource("Curve2D_e13wu"), SubResource("Curve2D_6pxmv"), SubResource("Curve2D_ovjqn"), SubResource("Curve2D_ssw2f")])
+channel_widths = PackedFloat32Array(1.25, 1.25, 1.25, 2)
+channel_end_widths = PackedFloat32Array(1.25, 1.25, 1.25, 1.6)
+channel_elevations = PackedFloat32Array(0.42, 0.28, 0.14, -0.14)
+void_regions = Array[Rect2]([Rect2(-0.15, 1.15, 1.25, 2.2)])
+camera_elevation = 70.0
+spawn = Rect2(-2.5, -4.3, 1.2, 1.5)
+goal = Rect2(1, 3.15, 1.8, 1.35)
 reservoir_id = &"source_02"
+route = PackedVector2Array(-1.9, -3.4, -1.9, -2.3, 1.7, -1.6, 1.8, -0.2, -1.7, 0.5, -1.7, 1.8, -0.15, 2.25, 0.65, 2.25, 1.9, 3.8)
