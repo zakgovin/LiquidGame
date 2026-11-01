@@ -67,6 +67,25 @@ func release_water(game: Node) -> void:
 	for frame: int in range(ceil(game.OPEN_SECONDS * 60) + 2): game._physics_process(1.0 / 60.0)
 
 
+func channels_visible(game: Node) -> bool:
+	# Check the line of sight from each channel centre towards the camera.
+	# A low camera lets a tall near wall cover the floor even with glass.
+	var toward_camera: Vector3 = game.turntable.basis.inverse() * game.camera.global_basis.z
+	for region: Rect2 in LEVEL.floor_regions:
+		var centre := region.get_center()
+		var point := Vector3(centre.x, LEVEL.floor_height(centre) + 0.01, centre.y)
+		for wall: PackedFloat32Array in LEVEL.wall_segments():
+			var x_face := absf(wall[0] - wall[2]) < 0.0001
+			var component := toward_camera.x if x_face else toward_camera.z
+			if absf(component) < 0.000001: continue
+			var distance := ((wall[0] - point.x) if x_face else (wall[1] - point.z)) / component
+			if distance <= 0.0001: continue
+			var hit := point + toward_camera * distance
+			var inside := hit.z >= wall[1] and hit.z <= wall[3] if x_face else hit.x >= wall[0] and hit.x <= wall[2]
+			if inside and hit.y > wall[4] and hit.y < wall[5]: return false
+	return true
+
+
 func _run() -> void:
 	var begin := Time.get_ticks_msec()
 	var fluid := LiquidSimulation.new(LEVEL, WATER)
@@ -371,8 +390,13 @@ func _run() -> void:
 				for y: float in [LEVEL.base_height - 0.08, LEVEL.board_top + 0.12]:
 					rotation_fits = rotation_fits and root.get_visible_rect().has_point(game.camera.unproject_position(game.pivot.to_global(Vector3(x, y, z))))
 	check(down_consistent and absf(game.rotation_angle) > 0.1, "Rotating the board changes its orientation while screen gravity stays down")
-	check(upright, "The board turns in 3D beneath a fixed isometric camera; verticals remain upright and zoom is constant")
+	check(upright, "The board turns in 3D beneath a fixed raised camera; verticals remain upright and zoom is constant")
 	check(rotation_fits, "The complete glass volume fits at both clockwise and counterclockwise orientations")
+	var all_channels_clear := true
+	for i: int in range(36):
+		game._rotate_field(TAU / 36.0)
+		all_channels_clear = all_channels_clear and channels_visible(game)
+	check(all_channels_clear, "At every ten-degree rotation, walls leave a clear line of sight to each channel centre")
 	check(enclosed == game.simulation.positions and game.hud.field.active, "Preparing the board allows rotation while all water remains enclosed")
 	var retained_angle: float = game.rotation_angle
 	game._pause()

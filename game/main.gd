@@ -4,6 +4,7 @@ enum Screen { MENU, READY, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, FINISHING, 
 const LEVEL: LevelDefinition = preload("res://resources/first_level.tres")
 const WATER: LiquidProfile = preload("res://resources/water.tres")
 const MAX_TILT: float = PI / 20.0 # Nine degrees; purely visual, never a second gravity.
+const ROTATION_CAMERA_ELEVATION: float = PI * 65.0 / 180.0
 
 var simulation: LiquidSimulation
 var controls := TiltInput.new()
@@ -204,9 +205,13 @@ func _update_camera(_delta: float) -> void:
 
 func _configure_camera() -> void:
 	var target := Vector3(0, 0.2, 0)
-	# A true isometric view has equal foreshortening on all three axes:
-	# 45 degrees of azimuth and atan(1 / sqrt(2)) elevation.
-	camera.position = target + Vector3.ONE * 18.0 if controls.use_rotation else Vector3(2.8, 24, 14)
+	# Keep the 45-degree azimuth, but look down steeply enough to see into
+	# the channels at every turn. Projection, framing and scale stay fixed.
+	if controls.use_rotation:
+		var horizontal := cos(ROTATION_CAMERA_ELEVATION) * 32.0 / sqrt(2.0)
+		camera.position = target + Vector3(horizontal, sin(ROTATION_CAMERA_ELEVATION) * 32.0, horizontal)
+	else:
+		camera.position = Vector3(2.8, 24, 14)
 	camera.look_at(target)
 	_camera_basis = camera.basis
 	_fit_viewport = Vector2.ZERO
