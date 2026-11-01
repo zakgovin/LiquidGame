@@ -40,6 +40,8 @@ var _caps: Array[Dictionary] = []
 var _goal_flaps: Array[Node3D] = []
 var _intake_phase: float = 0.0
 var _secured_seen: int = 0
+var _floor_support: Array[Dictionary] = []
+var step_patches: Array[Dictionary] = []
 
 
 static func _material(color: Color, roughness: float) -> StandardMaterial3D:
@@ -72,6 +74,10 @@ func build(level: LevelDefinition) -> void:
 		if not heights.has(height): heights.append(height)
 	heights.sort()
 	_lowest_floor = heights[0]
+	_floor_support = level.floor_faces().duplicate()
+	if _floor_support.is_empty():
+		for tile: Dictionary in level.terrain_tiles():
+			if tile.channel: _floor_support.append({"polygon": LevelDefinition.rectangle_polygon(tile.bounds), "height": tile.height})
 	var floors := {}
 	for height: float in heights:
 		var depth := (heights[-1] - height) / maxf(0.01, heights[-1] - heights[0])
@@ -79,7 +85,11 @@ func build(level: LevelDefinition) -> void:
 		floors[roundi(height * 10000)] = material
 		floor_materials.append(material)
 	if not level.channel_curves.is_empty() or not level.void_regions.is_empty():
-		for face: Dictionary in level.floor_faces(): _polygon(face.polygon, face.height, Vector3.UP, floors[roundi(face.height * 10000)])
+		for face: Dictionary in level.floor_faces():
+			var centre := Vector2.ZERO
+			for point: Vector2 in face.polygon: centre += point
+			centre /= face.polygon.size()
+			_polygon(face.polygon, face.height, Vector3.UP, _glass if level.is_spill_bank(centre) else floors[roundi(face.height * 10000)])
 		for polygon: PackedVector2Array in level.glass_patches():
 			_polygon(polygon, level.board_top, Vector3.UP, _glass)
 			_polygon(polygon, level.base_height, Vector3.DOWN, _glass)
@@ -109,16 +119,19 @@ func build(level: LevelDefinition) -> void:
 		var front := midpoint + normal * 0.01
 		var back := midpoint - normal * 0.01
 		var opening := level.is_void(front) or level.is_void(back) or not level.board_bounds.has_point(front) or not level.board_bounds.has_point(back)
-		var edge_material: Material = _slab_edge if step and opening else (_step if step else _glass)
+		var spill_bank := level.is_spill_bank(front) or level.is_spill_bank(back)
+		var edge_material: Material = _glass if spill_bank or not step else _slab_edge
 		_quad(Vector3(a.x, low, a.y), Vector3(b.x, low, b.y), Vector3(b.x, high, b.y), Vector3(a.x, high, a.y), Vector3(normal.x, 0, normal.y), edge_material)
-		if step and opening:
-			var n := Vector3(normal.x, 0, normal.y)
-			var ah := Vector3(a.x, high + 0.006, a.y)
-			var bh := Vector3(b.x, high + 0.006, b.y)
-			_quad(ah - n * 0.10, bh - n * 0.10, bh, ah, Vector3.UP, _step_lower if high <= _lowest_floor + 0.001 else _step)
+		if spill_bank:
+			glass_faces += 1
+			_caps.append({"a": a, "b": b, "height": high, "normal": normal})
+			var lip := PackedVector2Array([a - normal * 0.075, b - normal * 0.075, b, a])
+			_paint_floor(lip, high, _step)
+		elif step and opening:
+			_paint_floor(PackedVector2Array([a - normal * 0.10, b - normal * 0.10, b, a]), high, _step_lower if high <= _lowest_floor + 0.001 else _step)
 			open_edges += 1
 		elif step:
-			_mark_step(a, b, low, high, normal)
+			_mark_step(level, a, b, low, high, normal)
 		else:
 			glass_faces += 1
 			_caps.append({"a": a, "b": b, "height": high, "normal": normal})
@@ -280,25 +293,39 @@ func _contact_strip(a: Vector2, b: Vector2, height: float, normal: Vector2, opac
 	contact_bands += 1
 
 
-func _mark_step(a: Vector2, b: Vector2, low: float, high: float, downhill: Vector2) -> void:
+func _paint_floor(points: PackedVector2Array, height: float, material: Material) -> void:
+	# A band may only cover its actual landing. Extending an uncut quad over
+	# a curved junction produces the floating spikes seen in the old levels.
+	for face: Dictionary in _floor_support:
+		if absf(float(face.height) - height) > 0.0001: continue
+		for piece: PackedVector2Array in Geometry2D.intersect_polygons(points, face.polygon):
+			_polygon(piece, height + 0.006, Vector3.UP, material)
+			step_patches.append({"polygon": piece, "height": height})
+
+
+func _mark_step(level: LevelDefinition, a: Vector2, b: Vector2, low: float, high: float, downhill: Vector2) -> void:
 	# One continuous marking wraps over the lip, down the riser and onto
 	# the landing. Arrows on the high side identify the descent direction.
 	var n := Vector3(downhill.x, 0, downhill.y)
 	var ah := Vector3(a.x, high + 0.004, a.y)
 	var bh := Vector3(b.x, high + 0.004, b.y)
-	var al := Vector3(a.x, low + 0.004, a.y)
-	var bl := Vector3(b.x, low + 0.004, b.y)
-	_quad(ah - n * 0.24, bh - n * 0.24, bh, ah, Vector3.UP, _step)
-	_quad(al, bl, bl + n * 0.20, al + n * 0.20, Vector3.UP, _step_lower)
+	var riser_bottom := maxf(low, high - 0.075)
+	_quad(Vector3(a.x, riser_bottom, a.y) + n * 0.002, Vector3(b.x, riser_bottom, b.y) + n * 0.002, bh + n * 0.002, ah + n * 0.002, n, _step)
+	_paint_floor(PackedVector2Array([a - downhill * 0.12, b - downhill * 0.12, b, a]), high, _step)
+	_paint_floor(PackedVector2Array([a, b, b + downhill * 0.10, a + downhill * 0.10]), low, _step_lower)
 	var tangent := Vector3(b.x - a.x, 0, b.y - a.y).normalized()
 	var arrows: Array[float] = []
-	if a.distance_to(b) > 0.75: arrows.assign([0.33, 0.67])
-	elif a.distance_to(b) > 0.40: arrows.append(0.5)
+	if a.distance_to(b) > 1.0: arrows.assign([0.33, 0.67])
+	elif a.distance_to(b) > 0.55: arrows.append(0.5)
 	for fraction: float in arrows:
-		var centre := ah.lerp(bh, fraction) - n * 0.13 + Vector3.UP * 0.003
-		_triangle(centre + n * 0.095, centre - n * 0.08 - tangent * 0.075, centre - n * 0.08 + tangent * 0.075, Vector3.UP, _arrow_dark)
+		var centre := ah.lerp(bh, fraction) - n * 0.065 + Vector3.UP * 0.005
+		var points: Array[Vector3] = [centre + n * 0.045, centre - n * 0.04 - tangent * 0.05, centre - n * 0.04 + tangent * 0.05]
+		var supported := true
+		for point: Vector3 in points: supported = supported and absf(level.floor_height(Vector2(point.x, point.z)) - high) < 0.0001
+		if not supported: continue
+		_triangle(points[0], points[1], points[2], Vector3.UP, _arrow_dark)
 		centre += Vector3.UP * 0.002
-		_triangle(centre + n * 0.065, centre - n * 0.052 - tangent * 0.045, centre - n * 0.052 + tangent * 0.045, Vector3.UP, _arrow_light)
+		_triangle(centre + n * 0.03, centre - n * 0.024 - tangent * 0.025, centre - n * 0.024 + tangent * 0.025, Vector3.UP, _arrow_light)
 	var marker := Node3D.new()
 	marker.name = "StepFold"
 	marker.position = ah.lerp(bh, 0.5)

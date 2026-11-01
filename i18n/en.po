@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.12.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.12.1\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -161,7 +161,7 @@ msgid "LEVEL_BOTTLENECK"
 msgstr "Bottleneck"
 
 msgid "BOTTLENECK_ROUTE"
-msgstr "Feed a steady stream through the small opening.\nAvoid the side outlets; the final receiver has a check valve."
+msgstr "Feed gently through the small opening.\nStrong tilt can overtop the low banks into the spill wells."
 
 msgid "LEVEL_FORK"
 msgstr "Fork"

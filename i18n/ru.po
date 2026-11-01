@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.12.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.12.1\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "ГИДРОЛОГИКА"
@@ -161,7 +161,7 @@ msgid "LEVEL_BOTTLENECK"
 msgstr "Узкое горлышко"
 
 msgid "BOTTLENECK_ROUTE"
-msgstr "Проведите ровную струю через маленький проход.\nБоковые проёмы опасны; конечный приёмник защищён клапаном."
+msgstr "Плавно проведите воду через узкий проход.\nСильный наклон перельёт её через низкие борта в ловушки."
 
 msgid "LEVEL_FORK"
 msgstr "Развилка"

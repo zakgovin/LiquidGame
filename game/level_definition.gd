@@ -12,7 +12,9 @@ extends Resource
 @export var channel_end_widths := PackedFloat32Array()
 @export var channel_elevations := PackedFloat32Array()
 @export var void_regions: Array[Rect2] = []
+@export var spill_banks: Array[Rect2] = []
 @export var camera_elevation: float = 65.0
+@export_range(0.1, 1.0) var rotation_tilt_strength: float = 1.0
 @export var outline: PackedVector2Array
 @export var spawn: Rect2
 @export var reservoir_bounds: Rect2 = Rect2(-2.6, -4.5, 1.4, 1.8)
@@ -74,6 +76,12 @@ func is_void(point: Vector2) -> bool:
 	if contains(point): return false
 	for opening: Rect2 in void_regions:
 		if opening.has_point(point): return true
+	return false
+
+
+func is_spill_bank(point: Vector2) -> bool:
+	for bank: Rect2 in spill_banks:
+		if bank.has_point(point): return true
 	return false
 
 

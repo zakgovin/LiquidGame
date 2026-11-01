@@ -160,7 +160,10 @@ func check_curved_terrain() -> void:
 
 
 func check_curved_tilt(game: Node) -> void:
-	game._select_level(1)
+	for index: int in range(game.LEVELS.size()):
+		if game.LEVELS[index] == SECOND:
+			game._select_level(index)
+			break
 	game.controls.use_rotation = false
 	game.controls.sensitivity = 1.0
 	game._restart()
@@ -176,7 +179,7 @@ func check_curved_tilt(game: Node) -> void:
 			Input.set_gravity(Vector3(gx, gy, sqrt(maxf(0, 1.0 - gx * gx - gy * gy))) * 9.81)
 			game._physics_process(1.0 / 60.0)
 	print("Curved phone-tilt delivered fraction: ", game.simulation.goal_fraction, "; side losses: ", game.simulation.lost_count)
-	check(game.screen == game.Screen.WON and game.simulation.goal_fraction >= 0.8 and game.simulation.lost_without_rim == 0 and intact(game.simulation), "Sensor input, filtering and visual feedback can complete the curved level with conserved mass")
+	check(game.level == SECOND and game.screen == game.Screen.WON and game.simulation.goal_fraction >= 0.8 and game.simulation.lost_without_rim == 0 and intact(game.simulation), "Sensor input, filtering and visual feedback can complete the curved level with conserved mass")
 	Input.set_gravity(Vector3.ZERO)
 
 
@@ -419,14 +422,23 @@ func _run() -> void:
 	game._save_settings()
 	legacy.load("user://settings.cfg")
 	check(legacy.get_value("controls", "mode", "") == "rotation", "New settings persist the explicit rotation mode")
+	check(game.LEVELS[0].reservoir_id == &"source_01" and game.LEVELS[1].reservoir_id == &"source_04" and game.LEVELS[2].reservoir_id == &"source_02" and game.LEVELS[3].reservoir_id == &"source_03", "Display order is First Loop, Fork, Turns, Bottleneck")
+	for old_index: int in range(4):
+		var old_settings := ConfigFile.new()
+		old_settings.set_value("progress", "selected_level", old_index)
+		old_settings.save("user://settings.cfg")
+		game._load_settings()
+		check(game.level.reservoir_id == [&"source_01", &"source_02", &"source_03", &"source_04"][old_index], "An old saved index retains the same level after reordering: " + str(old_index))
+	game.controls.use_rotation = true
+	game._save_settings()
 	game._levels()
 	check(game.hud.buttons.has_all(["level_0", "level_1", "level_2", "level_3"]), "Level selection exposes all four available levels")
-	game.hud.buttons["level_1"].pressed.emit()
-	check(game.screen == game.Screen.MENU and game.level_index == 1 and game.level == SECOND, "Selecting level two loads its distinct channels and receiver")
+	game.hud.buttons["level_2"].pressed.emit()
+	check(game.screen == game.Screen.MENU and game.level_index == 2 and game.level == SECOND, "Selecting level three loads the winding channels and receiver")
 	var restored: Node = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(restored)
 	restored.set_physics_process(false)
-	check(restored.level_index == 1 and restored.level == SECOND and restored.board.source_targets.has(SECOND.reservoir_id), "A fresh application restores the selected second level before building its reservoir")
+	check(restored.level_index == 2 and restored.level == SECOND and restored.board.source_targets.has(SECOND.reservoir_id), "A fresh application restores the selected winding level by its stable identity")
 	restored.free()
 	game.camera.make_current()
 	game._start()
@@ -585,11 +597,11 @@ func _run() -> void:
 	check(game.screen == game.Screen.WON and game.hud.buttons.has("win_menu"), "Completion modal opens after the full quiet half second")
 	check(game.hud.buttons.has("next"), "First-level victory offers the next level")
 	game.hud.buttons["next"].pressed.emit()
-	check(game.level_index == 1 and game.level == SECOND and game.screen == game.Screen.READY and game.simulation.goal_fraction == 0.0, "Next level starts the second layout with its own sealed source and fresh water")
+	check(game.level_index == 1 and game.level.reservoir_id == &"source_04" and game.level.safe_goal and game.screen == game.Screen.READY and game.simulation.goal_fraction == 0.0, "Next level starts Fork second with its own sealed source and fresh water")
 	game._next_level()
-	check(game.level_index == 2 and game.level.safe_goal and game.screen == game.Screen.READY, "Next level opens the bottleneck with a protected receiver")
+	check(game.level_index == 2 and game.level == SECOND and game.screen == game.Screen.READY, "Next level opens Turns third")
 	game._next_level()
-	check(game.level_index == 3 and game.level.safe_goal and game.screen == game.Screen.READY, "Next level opens the fork with a protected receiver")
+	check(game.level_index == 3 and game.level.safe_goal and game.screen == game.Screen.READY, "Next level opens Bottleneck fourth with a protected receiver")
 	game._next_level()
 	check(game.level_index == 3 and game.screen == game.Screen.READY, "The fourth level cannot advance beyond the available list")
 	game._select_level(0)

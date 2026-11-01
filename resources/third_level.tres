@@ -5,7 +5,7 @@
 [sub_resource type="Curve2D" id="Curve2D_4mjbf"]
 bake_interval = 0.1
 _data = {
-"points": PackedVector2Array(0, 0, -0.35, 0.3, 0, 1.1, -0.2, -0.3, 0.2, 0.3, -0.55, 1.85, -0.3, -0.25, 0.3, 0.25, 0.35, 2.65, 0.3, -0.3, 0, 0, 0, 3.65)
+"points": PackedVector2Array(0, 0, -0.2, 0.15, 0, 1.45, -0.2, -0.25, 0.2, 0.25, -0.4, 1.9, -0.2, -0.15, 0.1, 0.15, 0.2, 2.35, 0, -0.15, 0, 0, 0, 2.7)
 }
 point_count = 4
 
@@ -13,17 +13,20 @@ point_count = 4
 script = ExtResource("1_fabqs")
 title = "LEVEL_BOTTLENECK"
 description = "BOTTLENECK_ROUTE"
-floor_regions = Array[Rect2]([Rect2(-0.7, -4.5, 1.4, 1.8), Rect2(-1.4, -2.7, 2.8, 2.7), Rect2(-0.24, 0, 0.48, 0.31), Rect2(-1, 0.31, 2, 1.2), Rect2(-0.8, 3.15, 1.6, 1.35), Rect2(-2.95, -1.35, 1.6, 0.42), Rect2(1.35, -1.35, 1.6, 0.42)])
-floor_elevations = PackedFloat32Array(0.42, 0.42, 0.42, 0.28, -0.14, 0.42, 0.42)
+floor_regions = Array[Rect2]([Rect2(-0.7, -4.5, 1.4, 1.8), Rect2(-1.4, -2.7, 2.8, 2.7), Rect2(-0.24, 0, 0.48, 1.1), Rect2(-1, 1.1, 2, 0.5), Rect2(-0.65, 2.7, 1.3, 0.45), Rect2(-0.8, 3.15, 1.6, 1.35), Rect2(-1.4, 0, 1.16, 0.16), Rect2(0.24, 0, 1.16, 0.16)])
+floor_elevations = PackedFloat32Array(0.42, 0.42, 0.42, 0.28, 0.14, -0.14, 0.70, 0.70)
 channel_curves = Array[Curve2D]([SubResource("Curve2D_4mjbf")])
 channel_widths = PackedFloat32Array(1.3)
 channel_end_widths = PackedFloat32Array()
-channel_elevations = PackedFloat32Array(0.14)
+channel_elevations = PackedFloat32Array(0.28)
+void_regions = Array[Rect2]([Rect2(-1.4, 0.16, 1.04, 0.94), Rect2(0.36, 0.16, 1.04, 0.94)])
+spill_banks = Array[Rect2]([Rect2(-1.4, 0, 1.16, 0.16), Rect2(0.24, 0, 1.16, 0.16)])
 camera_elevation = 70.0
+rotation_tilt_strength = 0.2
 spawn = Rect2(-0.59999996, -4.4, 1.1999999, 1.5999999)
 reservoir_bounds = Rect2(-0.7, -4.5, 1.4, 1.8)
 goal = Rect2(-0.8, 3.15, 1.6, 1.35)
 safe_goal = true
 obstacles = Array[AABB]([AABB(-0.24, 0.64, 0, 0.48, 0.62, 0.31)])
 reservoir_id = &"source_03"
-route = PackedVector2Array(0, -3.4, 0, -1, 0, 0.2, -0.55, 1.85, 0.35, 2.65, 0, 3.8)
+route = PackedVector2Array(0, -3.4, 0, -1, 0, 0.8, -0.4, 1.9, 0.2, 2.35, 0, 3.8)

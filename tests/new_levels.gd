@@ -39,7 +39,9 @@ static func run(check: Callable) -> void:
 	var far_cohesive := pair_distance(0.2, true)
 	check.call(absf(far_plain.x - far_cohesive.x) < 0.00001, 'Separated spray remains ballistic outside the finite cohesion radius')
 	var neck := LEVELS[2]
-	check.call(neck.safe_goal and neck.void_regions.is_empty() and neck.obstacles.size() == 1, 'Bottleneck has a solid floor, a real overhead lintel and a protected receiver')
+	check.call(neck.safe_goal and neck.void_regions.size() == 2 and neck.spill_banks.size() == 2 and neck.obstacles.size() == 1, 'Bottleneck has a supported route, two low banks with spill wells and a protected receiver')
+	check.call(neck.floor_height(Vector2(-2.8, -1.14)) == neck.board_top and neck.floor_height(Vector2(2.8, -1.14)) == neck.board_top, 'Former exterior side outlets are sealed')
+	check.call(is_equal_approx(neck.floor_height(Vector2(0, 0.8)), 0.42) and neck.floor_height(Vector2(0.3, 0.8)) == neck.board_top, 'The narrow passage keeps its floor and retaining rails beside the wells')
 	var single := neck.duplicate() as LevelDefinition
 	single.particle_count = 1
 	var drop := LiquidSimulation.new(single, WATER)
@@ -52,14 +54,18 @@ static func run(check: Callable) -> void:
 	check.call(drop.positions[0].z < 0 and drop.positions[0].y > 0.64, 'The same passage blocks a parcel above its actual opening')
 	for side: float in [-1.0, 1.0]:
 		drop.reset()
-		drop.set_particle(0, Vector3(side * 2.8, 0.437, -1.14), Vector3.ZERO)
-		advance(drop, 90, Vector2(side, 0))
-		check.call(drop.lost_count == 1 and drop.lost_without_rim == 0 and drop.lost_in_void == 0, 'A wrong sideways input can spill through the bottleneck outlet: ' + str(side))
+		drop.set_particle(0, Vector3(side * 0.9, 0.45, -0.08), Vector3(0, 0, 1.2))
+		advance(drop, 8, Vector2.ZERO)
+		check.call(drop.lost_count == 0 and drop.positions[0].z < 0, 'Each low bank retains a parcel below its lip: ' + str(side))
+		drop.reset()
+		drop.set_particle(0, Vector3(side * 0.9, 0.78, -0.05), Vector3(0, 0, 1.8))
+		advance(drop, 90, Vector2.DOWN)
+		check.call(drop.lost_count == 1 and drop.lost_without_rim == 0 and drop.lost_in_void == 1, 'Overtopping each bank really loses the parcel in the well behind it: ' + str(side))
 	var wrong := LiquidSimulation.new(neck, WATER)
 	for frame: int in range(480):
-		wrong.set_gate_opening(minf(float(frame) / 12.0, 1.0))
-		wrong.step(1.0 / 60.0, Vector2(-0.5, 1).normalized())
-	check.call(wrong.is_unwinnable() and wrong.lost_count > neck.particle_count * 0.2 and wrong.lost_without_rim == 0 and accounted(wrong), 'A misdirected full stream spills through the side outlet and fails the bottleneck')
+		wrong.set_gate_opening(minf(float(frame) / 12.6, 1.0))
+		wrong.step(1.0 / 60.0, Vector2.DOWN)
+	check.call(wrong.is_unwinnable() and wrong.lost_count > neck.particle_count * 0.2 and wrong.lost_in_void == wrong.lost_count and wrong.lost_without_rim == 0 and accounted(wrong), 'Full forward tilt overtops the low banks and fails instead of collecting water safely at the neck')
 	wrong = null
 	for level_index: int in [2, 3]:
 		var level := LEVELS[level_index]
@@ -75,8 +81,8 @@ static func run(check: Callable) -> void:
 		for phase: int in range(directions.size()):
 			for frame: int in range(frames[phase]):
 				angle = rotate_toward(angle, directions[phase].angle(), COURSES.TURN_SPEED / 60.0)
-				f.set_gate_opening(minf(float(elapsed) / 12.0, 1.0))
-				f.step(1.0 / 60.0, Vector2.from_angle(angle))
+				f.set_gate_opening(minf(float(elapsed) / (12.6 if level_index == 2 else 12.0), 1.0))
+				f.step(1.0 / 60.0, Vector2.from_angle(angle) * (directions[phase].length() if level_index == 2 else 1.0))
 				elapsed += 1
 				if level_index == 3 and frame % 6 == 0:
 					for i: int in range(f.positions.size()):
@@ -88,6 +94,7 @@ static func run(check: Callable) -> void:
 			check.call(accounted(f) and f.lost_without_rim == 0, 'Accounted mass and sealed terrain throughout lesson %d phase %d' % [level_index + 1, phase])
 		print('Lesson ', level_index + 1, ' delivered=', f.goal_fraction, ' secured=', f.secured_count, ' lost=', f.lost_count, ' elapsed=', elapsed / 60.0)
 		check.call(f.completed and f.goal_fraction >= 0.8, 'The new lesson completes through physical flow: ' + level.title)
+		if level_index == 2: check.call(f.lost_count < level.particle_count * 0.01 and f.lost_in_void == f.lost_count, 'Gentle forward tilt completes the neck while retaining over 99 percent of the initial water')
 		if level_index == 3:
 			var left := 0
 			var right := 0
@@ -116,3 +123,15 @@ static func run(check: Callable) -> void:
 		var surface_contained: bool = not surface.vertices.is_empty()
 		for point: Vector3 in surface.vertices: surface_contained = surface_contained and g.grow(0.005).has_point(Vector2(point.x, point.z)) and point.y <= level.board_top + 0.002
 		check.call(surface_contained, 'The retained free surface stays inside the covered receiver')
+	for level: LevelDefinition in [LEVELS[2], LEVELS[3]]:
+		var board := HydrologicBoard.new()
+		board.build(level)
+		var supported := not board.step_patches.is_empty()
+		for patch: Dictionary in board.step_patches:
+			var points: PackedVector2Array = patch.polygon
+			var triangles := Geometry2D.triangulate_polygon(points)
+			for i: int in range(0, triangles.size(), 3):
+				var centre := (points[triangles[i]] + points[triangles[i+1]] + points[triangles[i+2]]) / 3.0
+				supported = supported and absf(level.floor_height(centre) - float(patch.height)) < 0.001
+		check.call(supported, 'Every clipped marking triangle rests on its real landing: ' + level.title)
+		board.free()

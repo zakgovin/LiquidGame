@@ -1,7 +1,7 @@
 extends Node3D
 
 enum Screen { MENU, READY, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, FINISHING, WON, FAILED }
-const LEVELS: Array[LevelDefinition] = [preload("res://resources/first_level.tres"), preload("res://resources/second_level.tres"), preload("res://resources/third_level.tres"), preload("res://resources/fourth_level.tres")]
+const LEVELS: Array[LevelDefinition] = [preload("res://resources/first_level.tres"), preload("res://resources/fourth_level.tres"), preload("res://resources/second_level.tres"), preload("res://resources/third_level.tres")]
 var level_index: int = 0
 var level: LevelDefinition = LEVELS[0]
 const WATER: LiquidProfile = preload("res://resources/water.tres")
@@ -97,7 +97,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	var tilt := controls.sample(delta)
-	var world_tilt := input_to_world(Vector2.DOWN if controls.use_rotation else tilt)
+	var world_tilt := input_to_world(Vector2.DOWN * level.rotation_tilt_strength if controls.use_rotation else tilt)
 	if screen == Screen.PLAYING and opening:
 		_opening_remaining = maxf(0.0, _opening_remaining - delta)
 		board.set_reservoir_open_amount(1.0 - _opening_remaining / OPEN_SECONDS)
@@ -488,6 +488,7 @@ func _save_settings() -> void:
 	config.set_value("audio", "enabled", sounds.enabled)
 	config.set_value("locale", "language", language_code)
 	config.set_value("progress", "selected_level", level_index)
+	config.set_value("progress", "selected_level_id", String(LEVELS[level_index].reservoir_id))
 	config.save("user://settings.cfg")
 
 
@@ -500,7 +501,13 @@ func _load_settings() -> void:
 		tilt_feedback = bool(config.get_value("visual", "tilt_feedback", true))
 		sounds.set_enabled(bool(config.get_value("audio", "enabled", true)))
 		language_code = str(config.get_value("locale", "language", "ru"))
-		level_index = clampi(int(config.get_value("progress", "selected_level", 0)), 0, LEVELS.size() - 1)
+		var saved_index := clampi(int(config.get_value("progress", "selected_level", 0)), 0, LEVELS.size() - 1)
+		# Versions through 0.12.0 stored the old display index, before Fork moved.
+		var legacy_ids: Array[StringName] = [&"source_01", &"source_02", &"source_03", &"source_04"]
+		var saved_id := StringName(config.get_value("progress", "selected_level_id", legacy_ids[saved_index]))
+		level_index = 0
+		for index: int in range(LEVELS.size()):
+			if LEVELS[index].reservoir_id == saved_id: level_index = index
 	if language_code not in ["ru", "en"]: language_code = "ru"
 	TranslationServer.set_locale(language_code)
 	if is_instance_valid(board) and level != LEVELS[level_index]: _build_level()
