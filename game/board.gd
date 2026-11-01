@@ -37,6 +37,9 @@ var _spill_ages: Array[float] = []
 var _spill_material: StandardMaterial3D
 var _batches: Dictionary = {}
 var _caps: Array[Dictionary] = []
+var _goal_flaps: Array[Node3D] = []
+var _intake_phase: float = 0.0
+var _secured_seen: int = 0
 
 
 static func _material(color: Color, roughness: float) -> StandardMaterial3D:
@@ -124,7 +127,6 @@ func build(level: LevelDefinition) -> void:
 			_contact_strip(a, b, low, normal, 0.17 if not step else 0.11)
 
 	_finish_caps()
-	_finish_mesh()
 	if level.channel_curves.is_empty() and level.void_regions.is_empty():
 		_box(Vector3(level.board_bounds.size.x + 0.08, 0.08, level.board_bounds.size.y + 0.08), Vector3(level.board_bounds.get_center().x, level.base_height - 0.045, level.board_bounds.get_center().y), foundation)
 	var goal := level.goal
@@ -134,8 +136,53 @@ func build(level: LevelDefinition) -> void:
 	for x: float in [goal.position.x, goal.end.x]:
 		var side := _box(Vector3(0.10, 0.04, goal.size.y), Vector3(x, top, goal.get_center().y), _red)
 		side.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for obstacle: AABB in level.obstacles: _build_lintel(level, obstacle)
+	if level.safe_goal: _build_safe_goal(level)
 	_build_reservoir(level)
 	_build_spill_cues()
+	_finish_mesh()
+
+
+func _build_lintel(level: LevelDefinition, box: AABB) -> void:
+	_box(box.size, box.get_center(), _glass)
+	var bottom := level.floor_height(Vector2(box.get_center().x, box.get_center().z))
+	var height := box.position.y - bottom
+	for z: float in [box.position.z - 0.012, box.end.z + 0.012]:
+		for x: float in [box.position.x - 0.025, box.end.x + 0.025]:
+			_box(Vector3(0.05, height + 0.05, 0.04), Vector3(x, bottom + height * 0.5, z), _steel)
+		_box(Vector3(box.size.x + 0.10, 0.05, 0.04), Vector3(box.get_center().x, box.position.y + 0.005, z), _step)
+		_box(Vector3(box.size.x + 0.10, 0.025, 0.035), Vector3(box.get_center().x, bottom + 0.006, z), _steel)
+
+
+func _build_safe_goal(level: LevelDefinition) -> void:
+	var g := level.goal
+	var floor_y := level.floor_height(g.get_center())
+	var roof := level.board_top + 0.05
+	_box(Vector3(g.size.x, 0.08, g.size.y), Vector3(g.get_center().x, roof, g.get_center().y), _glass)
+	for x: float in [g.position.x, g.end.x]:
+		_box(Vector3(0.04, 0.04, g.size.y), Vector3(x, roof + 0.05, g.get_center().y), _steel)
+		_box(Vector3(0.035, 0.025, g.size.y), Vector3(x, floor_y + 0.012, g.get_center().y), _red)
+		for z: float in [g.position.y, g.end.y]:
+			_box(Vector3(0.035, roof - floor_y, 0.035), Vector3(x, (roof + floor_y) * 0.5, z), _steel)
+	_box(Vector3(g.size.x, 0.025, 0.035), Vector3(g.get_center().x, floor_y + 0.012, g.end.y), _red)
+	_box(Vector3(g.size.x + 0.04, 0.04, 0.04), Vector3(g.get_center().x, roof + 0.05, g.position.y), _steel)
+	for side: int in range(2):
+		var hinge := Node3D.new()
+		hinge.name = "CheckValve%d" % side
+		hinge.position = Vector3(g.position.x if side == 0 else g.end.x, (floor_y + level.board_top) * 0.5, g.position.y + 0.015)
+		add_child(hinge)
+		var offset := g.size.x * 0.25 * (1.0 if side == 0 else -1.0)
+		_box(Vector3(g.size.x * 0.5 - 0.02, level.board_top - floor_y - 0.04, 0.025), Vector3(offset, 0, 0), _glass_material(0.12), hinge)
+		_box(Vector3(0.025, level.board_top - floor_y, 0.04), Vector3(offset * 2, 0, 0), _rim, hinge)
+		_goal_flaps.append(hinge)
+	# An inset arrow on the receiver floor makes the allowed direction clear.
+	var centre := Vector3(g.get_center().x, floor_y + 0.009, g.position.y + 0.30)
+	_triangle(centre + Vector3(0, 0, 0.17), centre + Vector3(-0.14, 0, -0.12), centre + Vector3(0.14, 0, -0.12), Vector3.UP, _red)
+
+
+func show_goal_intake(secured: int) -> void:
+	if secured > _secured_seen: _intake_phase = 1.0
+	_secured_seen = secured
 
 
 func _mark_bank_jamb(level: LevelDefinition, a: Vector2, b: Vector2, low: float, high: float, normal: Vector2) -> void:
@@ -389,6 +436,9 @@ func show_spills(points: PackedVector3Array) -> void:
 
 
 func advance_effects(delta: float) -> void:
+	_intake_phase = maxf(0.0, _intake_phase - delta * 3.0)
+	for i: int in range(_goal_flaps.size()):
+		_goal_flaps[i].rotation.y = _intake_phase * 0.55 * (-1.0 if i == 0 else 1.0)
 	for i: int in range(_spill_cues.size()):
 		_spill_ages[i] += delta
 		var age := _spill_ages[i]
@@ -398,6 +448,9 @@ func advance_effects(delta: float) -> void:
 
 
 func clear_effects() -> void:
+	_secured_seen = 0
+	_intake_phase = 0.0
+	for flap: Node3D in _goal_flaps: flap.rotation = Vector3.ZERO
 	for i: int in range(_spill_cues.size()):
 		_spill_ages[i] = 1.0
 		_spill_cues[i].hide()

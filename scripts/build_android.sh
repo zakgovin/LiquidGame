@@ -5,5 +5,5 @@ mkdir -p build
 touch build/.gdignore
 python3 scripts/build_native.py --android
 ./scripts/godot.sh --headless --editor --import
-./scripts/godot.sh --headless --export-debug Android build/hydrologic-0.11.2-android.apk
-"${HYDRO_TOOLS:-/workspace/.hydrologic}/android-sdk/build-tools/36.0.0/apksigner" verify --verbose build/hydrologic-0.11.2-android.apk
+./scripts/godot.sh --headless --export-debug Android build/hydrologic-0.12.0-android.apk
+"${HYDRO_TOOLS:-/workspace/.hydrologic}/android-sdk/build-tools/36.0.0/apksigner" verify --verbose build/hydrologic-0.12.0-android.apk

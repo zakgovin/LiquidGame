@@ -13,3 +13,5 @@ extends Resource
 @export var particle_radius: float = 0.017
 @export var drag: float = 0.015
 @export var max_speed: float = 3.2
+@export var velocity_noise_limit: float = 0.4
+@export var subgrid_capillarity: bool = true

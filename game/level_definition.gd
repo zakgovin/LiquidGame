@@ -17,7 +17,9 @@ extends Resource
 @export var spawn: Rect2
 @export var reservoir_bounds: Rect2 = Rect2(-2.6, -4.5, 1.4, 1.8)
 @export var goal: Rect2
-@export var particle_count: int = 8192
+@export var particle_count: int = 6144
+@export var safe_goal: bool = false
+@export var obstacles: Array[AABB] = []
 @export var required_fraction: float = 0.8
 @export var hold_seconds: float = 0.75
 @export var flow_speed: float = 1.15

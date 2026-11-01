@@ -1,7 +1,7 @@
 extends Node3D
 
 enum Screen { MENU, READY, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, FINISHING, WON, FAILED }
-const LEVELS: Array[LevelDefinition] = [preload("res://resources/first_level.tres"), preload("res://resources/second_level.tres")]
+const LEVELS: Array[LevelDefinition] = [preload("res://resources/first_level.tres"), preload("res://resources/second_level.tres"), preload("res://resources/third_level.tres"), preload("res://resources/fourth_level.tres")]
 var level_index: int = 0
 var level: LevelDefinition = LEVELS[0]
 const WATER: LiquidProfile = preload("res://resources/water.tres")
@@ -107,6 +107,7 @@ func _physics_process(delta: float) -> void:
 			hud.show_game(controls.use_rotation)
 	if running:
 		simulation.step(delta, world_tilt)
+		board.show_goal_intake(simulation.secured_count)
 		board.show_spills(simulation.spill_points)
 		_render_tick += 1
 		if _render_tick % 2 == 0:
@@ -124,6 +125,7 @@ func _physics_process(delta: float) -> void:
 		# Let the tail of the stream reach the vessel before measuring the
 		# result. The quiet interval is real foreground time, not fluid time.
 		simulation.settle(delta, _finish_tilt)
+		board.show_goal_intake(simulation.secured_count)
 		board.show_spills(simulation.spill_points)
 		_render_tick += 1
 		if _render_tick % 2 == 0:

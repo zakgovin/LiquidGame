@@ -1,8 +1,9 @@
-// Hydrologic: incompressible 3D MAC / FLIP water with a particle free surface.
+// Hydrologic: incompressible 3D MAC / FLIP water with local capillary support.
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -30,6 +31,7 @@ struct FaceGrid {
     std::vector<uint8_t> valid;
     std::vector<int> touched;
 };
+struct CapillaryPair { int a,b; Vector3 delta; float distance; };
 }
 
 class NativeLiquidSolver : public RefCounted {
@@ -39,6 +41,7 @@ class NativeLiquidSolver : public RefCounted {
     std::vector<PolygonFloor> polygons, openings;
     std::vector<float> elevations;
     std::vector<Tile> tiles;
+    std::vector<AABB> obstacles;
     std::vector<std::array<float, 6>> walls;
     std::vector<Vector3> wall_normals;
     std::vector<int> wall_indices, no_walls;
@@ -48,6 +51,8 @@ class NativeLiquidSolver : public RefCounted {
     float cell_size = .07f, mass_density = 1000, viscosity = .000001f;
     float drag = .015f, max_speed = 3, flip_ratio = .95f;
     float surface_tension = .072f;
+    float velocity_noise_limit = .40f;
+    bool subgrid_capillarity = true;
     float lowest_floor = 0;
     float required = .8f, hold_seconds = .75f, fraction = 0, held = 0, flow_speed = 1.15f;
     float maximum_divergence = 0, liquid_volume = 0;
@@ -55,13 +60,20 @@ class NativeLiquidSolver : public RefCounted {
     int pressure_steps = 0;
     bool completed = false, reservoir_open = false, gate_controlled = false;
     bool curved = false;
+    bool safe_goal = false;
+    int secured = 0;
     float gate_fraction = 0, gate_lower = .42f;
     std::vector<int> gate_cells;
     Vector3 origin;
     std::vector<Vector3> positions, velocities;
+    std::vector<int> particle_heads,particle_next,particle_cells,support_count;
+    std::vector<Vector3> capillary_impulse;
+    std::vector<CapillaryPair> capillary_pairs;
     std::vector<Vector3> spill_points;
     std::vector<uint8_t> over_rim, escaped, through_void, loss_reason;
     std::vector<uint8_t> active, solid, vertical_wall;
+    std::vector<uint8_t> captured, valve_closed;
+    std::vector<int> valve_faces;
     std::vector<int> liquid_id, liquid_cells;
     std::vector<int> marker_count;
     std::vector<float> capillary_color;
@@ -130,7 +142,11 @@ class NativeLiquidSolver : public RefCounted {
     }
     bool face_blocked(int component, int x, int y, int z) const {
         if (!in_grid(x, y, z)) return true;
+        if (safe_goal && component==2 && valve_closed[index(x,y,z)]) return true;
         return is_solid(x, y, z) || is_solid(x - (component == 0), y - (component == 1), z - (component == 2));
+    }
+    bool valve_boundary(int cell, int offset) const {
+        return safe_goal && ((offset==-nx && valve_closed[cell]) || (offset==nx && valve_closed[cell+nx]));
     }
     Vector3 face_offset(int component) const {
         return component == 0 ? Vector3(0, .5f, .5f) :
@@ -150,7 +166,8 @@ class NativeLiquidSolver : public RefCounted {
             field.touched.clear();
         }
     }
-    void scatter(Vector3 point, Vector3 velocity) {
+    void scatter(int particle) {
+        Vector3 point=positions[particle],velocity=velocities[particle];
         Vector3 grid_point = (point - origin) / cell_size;
         int cx = int(std::floor(grid_point.x)), cy = int(std::floor(grid_point.y)), cz = int(std::floor(grid_point.z));
         if (in_grid(cx, cy, cz)) {
@@ -171,7 +188,9 @@ class NativeLiquidSolver : public RefCounted {
                 float weight = (dx ? f.x : 1 - f.x) * (dy ? f.y : 1 - f.y) * (dz ? f.z : 1 - f.z);
                 if (weight <= 0) continue;
                 int i = index(x, y, z); touch(field, i);
-                field.weight[i] += weight; field.velocity[i] += weight * velocity[component];
+                float value=velocity[component];
+
+                field.weight[i] += weight; field.velocity[i] += weight * value;
             }
         }
     }
@@ -233,7 +252,7 @@ class NativeLiquidSolver : public RefCounted {
             int cell = liquid_cells[k]; float value = diagonal[k] * input[k];
             for (int offset : neighbors) {
                 int id = liquid_id[cell + offset];
-                if (id >= 0) value -= input[id];
+                if (id >= 0 && !valve_boundary(cell,offset)) value -= input[id];
             }
             output[k] = value;
         }
@@ -246,7 +265,7 @@ class NativeLiquidSolver : public RefCounted {
         double rz = 0, b_squared = 0;
         for (size_t k = 0; k < size; ++k) {
             int cell = liquid_cells[k], d = 0;
-            for (int offset : neighbors) if (!solid[cell + offset]) ++d;
+            for (int offset : neighbors) if (!solid[cell + offset] && !valve_boundary(cell,offset)) ++d;
             diagonal[k] = std::max(d, 1);
             rhs[k] = -divergence(cell) * cell_size * cell_size * mass_density / dt;
             residual[k] = rhs[k]; preconditioned[k] = rhs[k] / diagonal[k]; direction[k] = preconditioned[k];
@@ -278,7 +297,7 @@ class NativeLiquidSolver : public RefCounted {
             FaceGrid &field = faces[component]; int offset = component == 0 ? 1 : (component == 1 ? plane : nx);
             for (int i : field.touched) {
                 int left = i - offset;
-                if (left < 0 || solid[i] || solid[left]) { field.velocity[i] = 0; continue; }
+                if (left < 0 || solid[i] || solid[left] || (safe_goal && component==2 && valve_closed[i])) { field.velocity[i] = 0; continue; }
                 int a = liquid_id[left], b = liquid_id[i];
                 if (a < 0 && b < 0) continue;
                 float pa = a >= 0 ? pressure[a] : 0, pb = b >= 0 ? pressure[b] : 0;
@@ -371,6 +390,9 @@ class NativeLiquidSolver : public RefCounted {
         if (reservoir.grow(radius).has_point(Vector2(point.x,point.z)) && std::abs(point.z - reservoir.get_end().y) < .08f && point.y > port - radius) {
             point = collide_box(point, Vector3(reservoir.position.x,port,reservoir.get_end().y - .025f), Vector3(reservoir.get_end().x,top + .11f,reservoir.get_end().y + .025f), radius);
         }
+        for (const auto &box:obstacles) point=collide_box(point,box.position,box.get_end(),radius);
+        if (safe_goal && goal.grow(radius).has_point(Vector2(point.x,point.z)))
+            point=collide_box(point,Vector3(goal.position.x,top+.01f,goal.position.y),Vector3(goal.get_end().x,top+.09f,goal.get_end().y),radius);
         return point;
     }
     void add_surface_tension(float dt) {
@@ -420,15 +442,83 @@ class NativeLiquidSolver : public RefCounted {
             }
         }
     }
+    void add_subgrid_capillarity(float dt) {
+        if (!subgrid_capillarity || surface_tension<=0 || count<2) return;
+        for (int i:particle_cells) particle_heads[i]=-1;
+        particle_cells.clear(); capillary_pairs.clear();
+        support_count.assign(count,0); capillary_impulse.assign(count,Vector3());
+        float h=2.25f*spacing,h2=h*h;
+        for (int i=0;i<count;++i) if (active[i]) {
+            Vector3 q=(positions[i]-origin)/cell_size;
+            int x=int(std::floor(q.x)),y=int(std::floor(q.y)),z=int(std::floor(q.z));
+            if (!in_grid(x,y,z)) continue;
+            int cell=index(x,y,z);
+            if (particle_heads[cell]<0) particle_cells.push_back(cell);
+            particle_next[i]=particle_heads[cell]; particle_heads[cell]=i;
+        }
+        for (int i=0;i<count;++i) if (active[i]) {
+            Vector3 p=positions[i],lo=(p-Vector3(h,h,h)-origin)/cell_size,hi=(p+Vector3(h,h,h)-origin)/cell_size;
+            for (int y=std::max(0,int(std::floor(lo.y)));y<=std::min(ny-1,int(std::floor(hi.y)));++y)
+            for (int z=std::max(0,int(std::floor(lo.z)));z<=std::min(nz-1,int(std::floor(hi.z)));++z)
+            for (int x=std::max(0,int(std::floor(lo.x)));x<=std::min(nx-1,int(std::floor(hi.x)));++x)
+            for (int j=particle_heads[index(x,y,z)];j>=0;j=particle_next[j]) {
+                if (j<=i || captured[i]!=captured[j]) continue;
+                Vector3 delta=positions[j]-p; float d2=delta.length_squared();
+                if (d2<1e-10f || d2>=h2) continue;
+                ++support_count[i]; ++support_count[j];
+                capillary_pairs.push_back({i,j,delta,std::sqrt(d2)});
+            }
+        }
+        // The grid resolves bulk surface tension. This symmetric correction
+        // only supplies the missing support in thin, under-resolved films.
+        // It has finite range, conserves pair momentum and leaves free spray
+        // ballistic once it separates from the surface.
+        float acceleration=2*surface_tension/(mass_density*radius*radius);
+        float capillary_speed=std::sqrt(surface_tension/(mass_density*radius));
+        float damping=std::min(dt*capillary_speed/radius,.12f);
+        for (const auto &pair:capillary_pairs) {
+            int a=pair.a,b=pair.b;
+            float sparse=clampf((20.f-float(std::min(support_count[a],support_count[b])))/16.f,0,1);
+            if (sparse<=0) continue;
+            Vector3 mid=(positions[a]+positions[b])*.5f;
+            if (mid.y<floor_height(Vector2(mid.x,mid.z))+radius*.25f) continue;
+            bool blocked=false;
+            for (const auto &box:obstacles) if (box.has_point(mid)) { blocked=true; break; }
+            if (blocked) continue;
+            Vector3 n=pair.delta/pair.distance;
+            float q=pair.distance/h,w=16*q*q*(1-q)*(1-q);
+            float stretch=clampf((pair.distance-spacing)/spacing,-.25f,1.f);
+            float separating=std::max((velocities[b]-velocities[a]).dot(n),0.f);
+            float impulse=acceleration*dt*stretch+std::min(separating,capillary_speed*2)*damping;
+            impulse*=sparse*w/std::max(1.f,.5f*float(support_count[a]+support_count[b]));
+            capillary_impulse[a]+=n*impulse; capillary_impulse[b]-=n*impulse;
+        }
+        float largest=0;
+        for (int i=0;i<count;++i) largest=std::max(largest,capillary_impulse[i].length());
+        float scale=largest>acceleration*dt ? acceleration*dt/largest : 1.f;
+        for (int i=0;i<count;++i) if (active[i]) velocities[i]+=capillary_impulse[i]*scale;
+    }
     void substep(float dt, Vector3 gravity) {
         clear_grid();
-        for (int i = 0; i < count; ++i) if (active[i]) scatter(positions[i], velocities[i]);
+        for (int i:valve_faces) valve_closed[i]=0;
+        add_subgrid_capillarity(dt);
+        for (int i = 0; i < count; ++i) if (active[i]) scatter(i);
         for (int component = 0; component < 3; ++component) {
             FaceGrid &field = faces[component];
             for (int i : field.touched) field.velocity[i] /= std::max(field.weight[i], 1e-12f);
+            if (safe_goal && component==2) for (int i:valve_faces) {
+                // A check valve admits a stream from the channel, but seals
+                // against reverse flow and against draining into empty air.
+                bool shut=marker_count[i]>0 && (marker_count[i-nx]==0 || field.velocity[i]+gravity.z*dt<0);
+                valve_closed[i]=shut;
+                if (shut) field.velocity[i]=0;
+            }
             extrapolate(component, 2);
             for (int i : field.touched) field.before[i] = field.velocity[i];
-            for (int i : field.touched) field.velocity[i] += gravity[component] * dt;
+            for (int i : field.touched) {
+                if (safe_goal && component==2 && valve_closed[i]) field.velocity[i]=0;
+                else field.velocity[i] += gravity[component] * dt;
+            }
             if (viscosity > 0) {
                 const int offsets[6] = {-1, 1, -nx, nx, -plane, plane};
                 float amount = std::min(viscosity * dt / (cell_size * cell_size), .12f);
@@ -458,7 +548,7 @@ class NativeLiquidSolver : public RefCounted {
             Vector3 previous = positions[i], pic = sample_velocity(previous);
             Vector3 flip = velocities[i] + pic - sample_velocity(previous,true);
             // Bound unresolved velocity noise; coherent grid motion is kept.
-            Vector3 residual_velocity=limited(flip-pic,.40f);
+            Vector3 residual_velocity=limited(flip-pic,velocity_noise_limit);
             Vector3 velocity=limited((pic+residual_velocity*flip_ratio)*std::exp(-drag*dt),max_speed);
             Vector3 midpoint = previous + sample_velocity(previous) * (.5f * dt);
             Vector3 candidate = previous + limited(sample_velocity(midpoint), max_speed) * dt;
@@ -471,13 +561,25 @@ class NativeLiquidSolver : public RefCounted {
             if (in_grid(x,y,z)) {
                 int cell = index(x,y,z);
                 for (int offset : {0,-1,1,-nx,nx,-plane,plane})
-                    if (cell + offset >= 0 && cell + offset < total) nearby += marker_count[cell + offset];
+                    if (cell+offset>=0 && cell+offset<total) nearby+=marker_count[cell+offset];
             }
             if (nearby < 4) {
                 velocity = limited((velocities[i] + gravity * dt) * std::exp(-drag * dt), max_speed);
                 candidate = previous + (velocities[i] + velocity) * (.5f * dt);
             }
-            Vector3 point = constrain(candidate, previous), contact = candidate - point;
+            Vector3 point = constrain(candidate, previous);
+            Vector2 goal_xz(point.x,point.z);
+            if (safe_goal && !captured[i] && goal.has_point(goal_xz) && point.y>=floor_height(goal_xz) && point.y<top-radius) {
+                captured[i]=1; ++secured;
+            }
+            if (safe_goal && captured[i]) {
+                // The retained volume stays active, visible and pressure
+                // coupled inside the covered receiver; it is never despawned.
+                point.x=clampf(point.x,goal.position.x+radius,goal.get_end().x-radius);
+                point.z=clampf(point.z,goal.position.y+radius,goal.get_end().y-radius);
+                point.y=clampf(point.y,floor_height(Vector2(point.x,point.z))+radius,top-radius);
+            }
+            Vector3 contact = candidate - point;
             if (contact.y * velocity.y > 0) velocity.y = 0;
             if (curved) {
                 Vector2 normal(contact.x,contact.z),horizontal(velocity.x,velocity.z);
@@ -536,16 +638,21 @@ class NativeLiquidSolver : public RefCounted {
     std::vector<Vector3> surface_gradient, surface_vertices, surface_normals;
     std::vector<uint8_t> surface_flags;
     std::vector<int> surface_touched, surface_cells;
-    void splat_surface(Vector3 p, float weight) {
+    void splat_surface(Vector3 p, float weight, bool confined=false) {
         Vector3 c = (p - surface_origin) / Vector3(SURFACE_CELL,SURFACE_Y,SURFACE_CELL); float r2 = KERNEL * KERNEL;
         const int offsets[8] = {0, -1, -SX, -SX - 1, -SLICE, -SLICE - 1, -SLICE - SX, -SLICE - SX - 1};
         for (int y = std::max(1, int(std::floor(c.y)) - 4); y < std::min(SY - 1, int(std::ceil(c.y)) + 5); ++y) {
             float wy = surface_origin.y + y * SURFACE_Y, dy = wy - p.y;
+            if (confined && wy>top) continue;
             if (dy * dy >= r2) continue;
             for (int z = std::max(1, int(std::floor(c.z)) - 2); z < std::min(SZ - 1, int(std::ceil(c.z)) + 3); ++z) {
                 float dz = surface_origin.z + z * SURFACE_CELL - p.z, yz2 = dy * dy + dz * dz;
                 if (yz2 >= r2) continue;
                 for (int x = std::max(1, int(std::floor(c.x)) - 2); x < std::min(SX - 1, int(std::ceil(c.x)) + 3); ++x) {
+                    if (confined && !goal.has_point(Vector2(surface_origin.x+x*SURFACE_CELL,surface_origin.z+z*SURFACE_CELL))) continue;
+                    bool obstructed=false;
+                    for (const auto &box:obstacles) if (box.has_point(Vector3(surface_origin.x+x*SURFACE_CELL,wy,surface_origin.z+z*SURFACE_CELL))) { obstructed=true; break; }
+                    if (obstructed) continue;
                     int plane_index = z * SX + x;
                     if (wy < surface_floor[plane_index] - .0001f) continue;
                     float dx = surface_origin.x + x * SURFACE_CELL - p.x, q = 1 - (dx * dx + yz2) / r2;
@@ -560,6 +667,7 @@ class NativeLiquidSolver : public RefCounted {
         }
     }
     Vector3 surface_contact(Vector3 point) const {
+        for (const auto &box:obstacles) point=collide_box(point,box.position,box.get_end(),.001f);
         float height = floor_height(Vector2(point.x, point.z));
         if (curved && point.y < base - .01f) return point;
         if (!std::isfinite(height) || point.y >= height + .001f) return point;
@@ -627,12 +735,17 @@ class NativeLiquidSolver : public RefCounted {
                 if (mirrors<2 && (p.y>=gate_lower || p.y>=elevations[0]+.35f) && reservoir.has_point(Vector2(p.x,p.z)) && reservoir.get_end().y-p.z<KERNEL) {
                     normals[mirrors]=Vector3(0,0,-1); anchors[mirrors]=Vector3(0,0,reservoir.get_end().y); ++mirrors;
                 }
+                if (captured[i] && p.z-goal.position.y<KERNEL) {
+                    bool reflected=false;
+                    for (int m=0;m<mirrors;++m) if (normals[m].z>.9f) reflected=true;
+                    if (!reflected && mirrors<2) { normals[mirrors]=Vector3(0,0,1); anchors[mirrors]=Vector3(0,0,goal.position.y); ++mirrors; }
+                }
                 float floor=floor_height(Vector2(p.x,p.z));
                 for (int mask=0;mask<(1<<mirrors);++mask) {
                     Vector3 image=p;
                     for (int m=0;m<mirrors;++m) if (mask&(1<<m)) image-=normals[m]*(2*(image-anchors[m]).dot(normals[m]));
-                    splat_surface(image,weight);
-                    if (std::isfinite(floor) && p.y-floor<KERNEL) splat_surface(Vector3(image.x,2*floor-p.y,image.z),weight);
+                    splat_surface(image,weight,captured[i]);
+                    if (std::isfinite(floor) && p.y-floor<KERNEL) splat_surface(Vector3(image.x,2*floor-p.y,image.z),weight,captured[i]);
                 }
                 continue;
             }
@@ -748,7 +861,7 @@ protected:
     }
 public:
     void configure(const Dictionary &cfg) {
-        floors.clear(); elevations.clear(); tiles.clear(); walls.clear(); polygons.clear(); voids.clear(); openings.clear();
+        floors.clear(); elevations.clear(); tiles.clear(); walls.clear(); polygons.clear(); voids.clear(); openings.clear(); obstacles.clear();
         Array fs = cfg["regions"], ts = cfg["tiles"], ws = cfg["walls"];
         PackedFloat32Array heights = cfg["elevations"];
         for (int i = 0; i < fs.size(); ++i) { floors.push_back(Rect2(fs[i])); elevations.push_back(i < heights.size() ? heights[i] : 0); }
@@ -762,6 +875,8 @@ public:
         if (cfg.has("voids")) { Array vs=cfg["voids"]; for (int i=0;i<vs.size();++i) voids.push_back(Rect2(vs[i])); }
         if (cfg.has("openings")) { Array os=cfg["openings"]; for (int i=0;i<os.size();++i) openings.push_back(read_polygon(PackedVector2Array(os[i]))); }
         bounds = cfg["bounds"]; reservoir = cfg.has("reservoir") ? Rect2(cfg["reservoir"]) : Rect2(cfg["spawn"]); goal = cfg["goal"];
+        safe_goal=cfg.has("safe_goal") && bool(cfg["safe_goal"]);
+        if (cfg.has("obstacles")) { Array boxes=cfg["obstacles"]; for (int i=0;i<boxes.size();++i) obstacles.push_back(AABB(boxes[i])); }
         count = int(cfg["count"]); top = float(cfg["top"]); base = float(cfg["base"]); spacing = float(cfg["spacing"]); radius = float(cfg["radius"]);
         lowest_floor=top;
         for (auto height:elevations) lowest_floor=std::min(lowest_floor,height);
@@ -777,6 +892,8 @@ public:
         }
         mass_density = float(cfg["rho"]); max_speed = float(cfg["max_speed"]); drag = float(cfg["drag"]); viscosity = float(cfg["viscosity"]);
         surface_tension = cfg.has("surface_tension") ? float(cfg["surface_tension"]) : .072f;
+        velocity_noise_limit=cfg.has("velocity_noise_limit") ? clampf(float(cfg["velocity_noise_limit"]),0,.4f) : .40f;
+        subgrid_capillarity=!cfg.has("subgrid_capillarity") || bool(cfg["subgrid_capillarity"]);
         required = float(cfg["required"]); hold_seconds = float(cfg["hold"]);
         flow_speed = cfg.has("flow_speed") ? clampf(float(cfg["flow_speed"]), .5f, 1.5f) : 1.15f;
         ERR_FAIL_COND(count < 1 || count > 32768 || spacing <= 0 || floors.empty());
@@ -785,6 +902,7 @@ public:
         nz = int(std::ceil((bounds.get_end().y + .49f - origin.z) / cell_size)) + 2;
         ny = int(std::ceil((top + 1.2f - origin.y) / cell_size)) + 2;
         plane = nx * nz; total = plane * ny;
+        particle_heads.assign(total,-1); particle_next.resize(count); particle_cells.clear();
         wall_bins.clear();
         if (curved) {
             wall_bins.resize(plane);
@@ -805,7 +923,18 @@ public:
             Vector3 p = origin + Vector3(x + .5f, y + .5f, z + .5f) * cell_size;
             bool roof = reservoir.has_point(Vector2(p.x,p.z)) && p.y >= top + .07f && p.y < top + .11f;
             bool header = p.x >= reservoir.position.x && p.x <= reservoir.get_end().x && std::abs(p.z - reservoir.get_end().y) < .035f && p.y > elevations[0] + .35f && p.y < top + .11f;
-            solid[index(x,y,z)] = p.y < floor_cache[z*nx+x] || roof || header;
+            bool obstruction=false;
+            for (const auto &box:obstacles) if (box.has_point(p)) { obstruction=true; break; }
+            bool goal_roof=safe_goal && goal.has_point(Vector2(p.x,p.z)) && p.y>=top+.01f && p.y<top+.09f;
+            solid[index(x,y,z)] = p.y < floor_cache[z*nx+x] || roof || header || obstruction || goal_roof;
+        }
+        valve_faces.clear(); valve_closed.assign(safe_goal ? total : 0,0);
+        if (safe_goal) {
+            int z=std::max(1,std::min(nz-2,int(std::round((goal.position.y-origin.z)/cell_size))));
+            for (int y=1;y<ny-1;++y) for (int x=1;x<nx-1;++x) {
+                int i=index(x,y,z); float wx=origin.x+(x+.5f)*cell_size;
+                if (wx>goal.position.x && wx<goal.get_end().x && !solid[i] && !solid[i-nx]) valve_faces.push_back(i);
+            }
         }
         for (int y = 1; y < ny - 1; ++y) for (int z = 1; z < nz - 1; ++z) for (int x = 1; x < nx - 1; ++x) {
             int i = index(x,y,z); vertical_wall[i] = solid[i] || solid[i-1] || solid[i+1] || solid[i-nx] || solid[i+nx];
@@ -824,6 +953,10 @@ public:
     void reset() {
         clear_grid(); positions.resize(count); velocities.assign(count,Vector3()); active.assign(count,1);
         over_rim.assign(count,0); escaped.assign(count,0); through_void.assign(count,0); loss_reason.assign(count,0); spill_points.clear();
+        captured.assign(count,0); secured=0;
+        for (int i:particle_cells) particle_heads[i]=-1;
+        particle_cells.clear(); capillary_pairs.clear();
+        for (int i:valve_faces) valve_closed[i]=0;
         Rect2 water = reservoir.grow(-radius - .002f);
         int columns = std::max(1,int(std::round(water.size.x / spacing))), rows = std::max(1,int(std::round(water.size.y / spacing)));
         int layers = std::max(1,int(std::ceil(float(count) / (columns * rows)))), slots = columns * rows * layers;
@@ -891,6 +1024,7 @@ public:
         Dictionary d; d["positions"] = p; d["velocities"] = v; d["active"] = a; d["lost"] = lost;
         d["delivered"] = delivered; d["remaining"] = count - lost - delivered; d["lost_without_rim"] = lost_without_rim;
         d["lost_in_void"] = lost_in_void;
+        d["secured"] = secured;
         PackedVector3Array spills;
         for (auto point : spill_points) spills.push_back(point);
         d["spills"] = spills;
@@ -901,6 +1035,7 @@ public:
     Dictionary build_surface() { return make_surface(); }
     void set_particle_state(int i, Vector3 p, Vector3 v) {
         ERR_FAIL_INDEX(i,count); positions[i]=p; velocities[i]=v;
+        if (captured[i]) { captured[i]=0; --secured; }
         if (!active[i]) { active[i]=1; --lost; if (loss_reason[i]==2) --lost_in_void; if (loss_reason[i]==3) --lost_without_rim; }
         over_rim[i]=p.y>=top-radius; through_void[i]=0; loss_reason[i]=0; escaped[i]=0;
     }

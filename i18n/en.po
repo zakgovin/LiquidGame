@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.11.2\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.12.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -53,7 +53,7 @@ msgid "LEVEL_ROUTE"
 msgstr "A full loop through a 3D channel.\nGuide the water over steps into the vessel."
 
 msgid "LEVEL_COUNT"
-msgstr "Two levels are available in the prototype."
+msgstr "Four levels are available in the prototype."
 
 msgid "LANGUAGE"
 msgstr "Language"
@@ -156,3 +156,15 @@ msgstr "A winding route with an opening in the outer wall.\nFollow the continuou
 
 msgid "NEXT_LEVEL"
 msgstr "Next level"
+
+msgid "LEVEL_BOTTLENECK"
+msgstr "Bottleneck"
+
+msgid "BOTTLENECK_ROUTE"
+msgstr "Feed a steady stream through the small opening.\nAvoid the side outlets; the final receiver has a check valve."
+
+msgid "LEVEL_FORK"
+msgstr "Fork"
+
+msgid "FORK_ROUTE"
+msgstr "Split the stream and collect both parts.\nDelivered water stays in the protected receiver."

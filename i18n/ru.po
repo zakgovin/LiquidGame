@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.11.2\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.12.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "ГИДРОЛОГИКА"
@@ -53,7 +53,7 @@ msgid "LEVEL_ROUTE"
 msgstr "Полный виток по объёмному каналу.\nСтупени, инерция и переливание в сосуд."
 
 msgid "LEVEL_COUNT"
-msgstr "В прототипе доступны два уровня."
+msgstr "В прототипе доступны четыре уровня."
 
 msgid "LANGUAGE"
 msgstr "Язык"
@@ -156,3 +156,15 @@ msgstr "Извилистый маршрут с проёмом во внешне�
 
 msgid "NEXT_LEVEL"
 msgstr "Следующий уровень"
+
+msgid "LEVEL_BOTTLENECK"
+msgstr "Узкое горлышко"
+
+msgid "BOTTLENECK_ROUTE"
+msgstr "Проведите ровную струю через маленький проход.\nБоковые проёмы опасны; конечный приёмник защищён клапаном."
+
+msgid "LEVEL_FORK"
+msgstr "Развилка"
+
+msgid "FORK_ROUTE"
+msgstr "Разделите поток и соберите обе части.\nДоставленная вода остаётся в защищённом приёмнике."
