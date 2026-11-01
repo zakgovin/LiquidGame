@@ -4,17 +4,19 @@
 
 [resource]
 script = ExtResource("1")
-title = "Первый виток"
+title = "LEVEL_FIRST_LOOP"
 floor_regions = Array[Rect2]([Rect2(-2.6, -4.5, 1.4, 9), Rect2(-2.6, 3.1, 5.2, 1.4), Rect2(1.2, -4.5, 1.4, 9), Rect2(-0.7, -4.5, 3.3, 1.4), Rect2(-0.7, -4.5, 1.4, 6.6)])
 outline = PackedVector2Array(-2.6, -4.5, -1.2, -4.5, -1.2, 3.1, 1.2, 3.1, 1.2, -3.1, 0.7, -3.1, 0.7, 2.1, -0.7, 2.1, -0.7, -4.5, 2.6, -4.5, 2.6, 4.5, -2.6, 4.5)
 spawn = Rect2(-2.5, -4.3, 1.2, 2)
 goal = Rect2(-0.68, 0, 1.36, 2.08)
-particle_count = 512
+particle_count = 8192
 required_fraction = 0.8
 hold_seconds = 0.75
 board_bounds = Rect2(-2.95, -4.9, 5.9, 9.8)
 route = PackedVector2Array(-1.9, -3.4, -1.9, 3.8, 1.9, 3.8, 1.9, -3.8, 0, -3.8, 0, 1.1)
 
 floor_elevations = PackedFloat32Array(0.42, 0.28, 0.14, 0, -0.14)
-board_top = 0.82
-base_height = -0.55
+board_top = 1.19
+base_height = -0.56
+
+reservoir_bounds = Rect2(-2.6, -4.5, 1.4, 1.8)

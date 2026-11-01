@@ -11,7 +11,7 @@ signal settings_requested
 signal about_requested
 signal levels_requested
 signal level_selected(index: int)
-signal calibrate_requested
+signal language_changed(code: String)
 signal sensitivity_changed(value: float)
 signal mode_changed(use_touch: bool)
 signal feedback_changed(enabled: bool)
@@ -31,9 +31,6 @@ var page: Control
 var brand: HydrologicBrand
 var _modal: Control
 var _frames: Array[Control] = []
-var _calibration_status: Label
-var _calibration_button: Button
-var _sensor_available: bool = false
 var buttons: Dictionary = {}
 var slider: HSlider
 var feedback_toggle: CheckButton
@@ -52,9 +49,13 @@ func _ready() -> void:
 	field.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(field)
 	pause_button = _button("Ⅱ", Rect2(0, 0, 104, 104), false, func(): pause_requested.emit(), self, "pause")
-	pause_button.tooltip_text = "Пауза"
+	pause_button.tooltip_text = tr("PAUSE")
 	resized.connect(_layout)
 	_layout()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and is_instance_valid(pause_button): pause_button.tooltip_text = tr("PAUSE")
 
 
 func _layout() -> void:
@@ -73,8 +74,6 @@ func _clear_page() -> void:
 	_frames.clear()
 	buttons.clear()
 	buttons["pause"] = pause_button
-	_calibration_status = null
-	_calibration_button = null
 	field.active = false
 	field.reset()
 
@@ -110,11 +109,11 @@ func show_menu(level_title: String) -> void:
 	brand.position = Vector2(48, 140)
 	brand.size = Vector2(624, 412)
 	frame.add_child(brand)
-	_button("01   " + level_title + "   ›", Rect2(48, 620, 624, 104), false, func(): levels_requested.emit(), frame, "levels")
-	var play := _button("Играть", Rect2(48, 752, 624, 120), true, func(): start_requested.emit(), frame, "play")
+	_button("01   " + tr(level_title) + "   ›", Rect2(48, 620, 624, 104), false, func(): levels_requested.emit(), frame, "levels")
+	var play := _button(tr("PLAY"), Rect2(48, 752, 624, 120), true, func(): start_requested.emit(), frame, "play")
 	play.add_theme_font_size_override("font_size", 40)
-	_button("Настройки", Rect2(48, 904, 300, 104), false, func(): settings_requested.emit(), frame, "settings")
-	_button("Об игре", Rect2(372, 904, 300, 104), false, func(): about_requested.emit(), frame, "about")
+	_button(tr("SETTINGS"), Rect2(48, 904, 300, 104), false, func(): settings_requested.emit(), frame, "settings")
+	_button(tr("ABOUT"), Rect2(372, 904, 300, 104), false, func(): about_requested.emit(), frame, "about")
 
 
 func show_game(touch_enabled: bool) -> void:
@@ -145,9 +144,9 @@ func show_ready(opening: bool = false) -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 14)
 	card.add_child(column)
-	var caption := _text("Держите телефон удобно.\nОткройте резервуар, когда будете готовы.", column, 26)
+	var caption := _text(tr("READY_HINT"), column, 26)
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var release := _button("Открываем…" if opening else "Открыть резервуар", Rect2(0, 0, 0, 104), true, func(): release_requested.emit(), column, "release")
+	var release := _button(tr("OPENING") if opening else tr("RELEASE_WATER"), Rect2(0, 0, 0, 104), true, func(): release_requested.emit(), column, "release")
 	release.custom_minimum_size.y = 104
 	release.disabled = opening
 
@@ -164,6 +163,7 @@ func _page_header(title: String) -> VBoxContainer:
 	settings_scroll.offset_top = 160
 	settings_scroll.offset_bottom = -192
 	settings_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	settings_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	settings_scroll.follow_focus = true
 	page.add_child(settings_scroll)
 	var column := VBoxContainer.new()
@@ -178,60 +178,37 @@ func _page_header(title: String) -> VBoxContainer:
 	style.border_width_top = 2
 	footer.add_theme_stylebox_override("panel", style)
 	page.add_child(footer)
-	_button("В главное меню", Rect2(48, 32, 624, 104), false, func(): menu_requested.emit(), footer, "back")
+	_button(tr("MAIN_MENU"), Rect2(48, 32, 624, 104), false, func(): menu_requested.emit(), footer, "back")
 	return column
 
 
 func show_levels(level_title: String) -> void:
-	var column := _page_header("Уровни")
-	_text("Выберите маршрут", column, 30)
-	var level := _button("01   " + level_title, Rect2(0, 0, 0, 120), true, func(): level_selected.emit(0), column, "level_0")
+	var column := _page_header(tr("LEVELS"))
+	_text(tr("CHOOSE_ROUTE"), column, 30)
+	var level := _button("01   " + tr(level_title), Rect2(0, 0, 0, 120), true, func(): level_selected.emit(0), column, "level_0")
 	level.custom_minimum_size.y = 120
-	_text("Полный виток по объёмному каналу.\nСтупени, инерция и переливание в сосуд.", column)
-	_text("В прототипе пока доступен один уровень.", column, 26)
+	_text(tr("LEVEL_ROUTE"), column)
+	_text(tr("LEVEL_COUNT"), column, 26)
 
 
-func show_settings(sensitivity: float, use_touch: bool, feedback: bool, sensor: bool, sound: bool = true) -> void:
-	var column := _page_header("Настройки")
-	_sensor_available = sensor
-	_text("Управление", column, 34, true, INK)
-	var choices := HBoxContainer.new()
-	choices.add_theme_constant_override("separation", 0)
-	column.add_child(choices)
-	var group := ButtonGroup.new()
-	for choice: int in range(2):
-		var touch := choice == 1
-		var option := _button("Касание" if touch else "Наклон", Rect2(0, 0, 0, 104), false, func(): _select_mode(touch), choices, "mode_touch" if touch else "mode_tilt")
-		option.custom_minimum_size.y = 104
-		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		option.toggle_mode = true
-		option.button_group = group
-		option.button_pressed = use_touch == touch
-		var selected := _style(Color("d0eef3"), 24)
-		var normal_style := _style(Color("f3f7f8"), 0)
-		normal_style.border_color = Color("77929b")
-		normal_style.set_border_width_all(2)
-		for appearance: StyleBoxFlat in [normal_style, selected]:
-			appearance.corner_radius_top_left = 0 if touch else 52
-			appearance.corner_radius_bottom_left = 0 if touch else 52
-			appearance.corner_radius_top_right = 52 if touch else 0
-			appearance.corner_radius_bottom_right = 52 if touch else 0
-		option.add_theme_stylebox_override("normal", normal_style)
-		selected.border_color = PRIMARY
-		selected.set_border_width_all(2)
-		option.add_theme_stylebox_override("pressed", selected)
-		option.add_theme_color_override("font_pressed_color", PRIMARY)
-		option.add_theme_color_override("font_hover_pressed_color", PRIMARY)
-	_update_mode_labels(use_touch)
+func show_settings(sensitivity: float, use_touch: bool, feedback: bool, sensor: bool, sound: bool = true, language: String = "ru") -> void:
+	var content := _page_header(tr("SETTINGS"))
+	var language_group := _settings_card(content)
+	_text(tr("LANGUAGE"), language_group, 32, true, INK)
+	_segments(["Русский", "English"], ["language_ru", "language_en"], 1 if language == "en" else 0, language_group, func(choice: int): language_changed.emit("en" if choice == 1 else "ru"))
+	var controls_group := _settings_card(content)
+	_text(tr("CONTROLS"), controls_group, 32, true, INK)
+	_segments([tr("MODE_TILT"), tr("MODE_TOUCH")], ["mode_tilt", "mode_touch"], 1 if use_touch else 0, controls_group, func(choice: int): mode_changed.emit(choice == 1))
+	if not sensor: _text(tr("NO_SENSOR"), controls_group, 24)
 	var value_row := HBoxContainer.new()
-	column.add_child(value_row)
-	var caption := _text("Чувствительность", value_row, 30, false, INK)
+	controls_group.add_child(value_row)
+	var caption := _text(tr("SENSITIVITY"), value_row, 28, false, INK)
 	caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var amount := _text("×%.1f" % sensitivity, value_row, 30, true, PRIMARY)
+	var amount := _text("×%.1f" % sensitivity, value_row, 28, true, PRIMARY)
 	amount.custom_minimum_size.x = 84
 	amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	slider = HSlider.new()
-	slider.custom_minimum_size.y = 96 # 48 dp hit area at the 720-unit canvas scale.
+	slider.custom_minimum_size.y = 96
 	slider.min_value = 0.5
 	slider.max_value = 1.8
 	slider.step = 0.1
@@ -255,44 +232,77 @@ func show_settings(sensitivity: float, use_touch: bool, feedback: bool, sensor: 
 	var padding := MarginContainer.new()
 	padding.add_theme_constant_override("margin_left", 20)
 	padding.add_theme_constant_override("margin_right", 20)
-	column.add_child(padding)
+	controls_group.add_child(padding)
 	padding.add_child(slider)
 	var limits := HBoxContainer.new()
-	column.add_child(limits)
-	_text("Мягче  0,5", limits, 24)
-	var faster := _text("Быстрее  1,8", limits, 24)
+	controls_group.add_child(limits)
+	_text(tr("SOFTER"), limits, 24)
+	var faster := _text(tr("FASTER"), limits, 24)
 	faster.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	faster.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_divider(column)
-	feedback_toggle = _switch("Наклон поля", "Слегка поворачивать сцену вслед за телефоном", feedback, column)
+	_text(tr("CONTROL_HELP"), controls_group, 24)
+	var feedback_group := _settings_card(content)
+	_text(tr("FEEDBACK"), feedback_group, 32, true, INK)
+	feedback_toggle = _switch(tr("TILT_FEEDBACK"), tr("TILT_DESCRIPTION"), feedback, feedback_group)
 	feedback_toggle.toggled.connect(func(value: bool):
 		feedback_changed.emit(value)
 		interaction.emit())
-	sound_toggle = _switch("Звуки игры", "Нажатия, открытие резервуара и результат уровня", sound, column)
+	_divider(feedback_group)
+	sound_toggle = _switch(tr("SOUNDS"), tr("SOUND_DESCRIPTION"), sound, feedback_group)
 	sound_toggle.toggled.connect(func(value: bool):
 		sound_changed.emit(value)
 		interaction.emit())
-	_divider(column)
-	_calibration_button = _button("Калибровать наклон", Rect2(0, 0, 0, 104), false, func(): calibrate_requested.emit(), column, "calibrate")
-	_calibration_button.custom_minimum_size.y = 104
-	_calibration_button.disabled = not sensor or use_touch
-	_calibration_status = _text("Держите телефон удобно и нажмите кнопку." if sensor else "Датчик не найден. Используйте касание экрана.", column, 26)
-	_text("При ×1: первые 6° — спокойная зона, полный наклон — 36°.\n\nВ начале уровня вода закрыта. Положение телефона запомнится, когда вы откроете резервуар.", column, 26)
 
 
-func _select_mode(touch: bool) -> void:
-	_update_mode_labels(touch)
-	if is_instance_valid(_calibration_button): _calibration_button.disabled = touch or not _sensor_available
-	mode_changed.emit(touch)
+func _settings_card(parent: Node) -> VBoxContainer:
+	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	var style := _style(Color("f8fbfc"), 24)
+	style.content_margin_left = 24
+	style.content_margin_right = 24
+	style.content_margin_top = 24
+	style.content_margin_bottom = 24
+	style.border_color = Color("dce6ea")
+	style.set_border_width_all(1)
+	panel.add_theme_stylebox_override("panel", style)
+	parent.add_child(panel)
+	var group := VBoxContainer.new()
+	group.add_theme_constant_override("separation", 12)
+	panel.add_child(group)
+	return group
 
 
-func _update_mode_labels(touch: bool) -> void:
-	buttons["mode_tilt"].text = "Наклон" if touch else "✓  Наклон"
-	buttons["mode_touch"].text = "✓  Касание" if touch else "Касание"
-
-
-func calibration_done() -> void:
-	if is_instance_valid(_calibration_status): _calibration_status.text = "Удобное положение сохранено."
+func _segments(labels: Array[String], ids: Array[String], selected: int, parent: Node, changed: Callable) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 0)
+	parent.add_child(row)
+	var group := ButtonGroup.new()
+	for i: int in range(labels.size()):
+		var choice := i
+		var option := _button(("✓  " if selected == i else "") + labels[i], Rect2(0, 0, 0, 104), false, func():
+			for j: int in range(ids.size()): buttons[ids[j]].text = ("✓  " if choice == j else "") + labels[j]
+			changed.call(choice), row, ids[i])
+		option.custom_minimum_size.y = 104
+		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		option.toggle_mode = true
+		option.button_group = group
+		option.button_pressed = selected == i
+		for state: String in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+			var fill := Color("d0eef3") if state == "pressed" or state == "hover_pressed" else Color("f3f7f8")
+			if state == "hover": fill = Color("e4f1f4")
+			if state == "focus": fill = Color.TRANSPARENT
+			var style := _style(fill, 0)
+			style.corner_radius_top_left = 52 if i == 0 else 0
+			style.corner_radius_bottom_left = 52 if i == 0 else 0
+			style.corner_radius_top_right = 52 if i == labels.size() - 1 else 0
+			style.corner_radius_bottom_right = 52 if i == labels.size() - 1 else 0
+			style.border_color = Color("77929b") if state == "normal" else PRIMARY
+			style.set_border_width_all(2)
+			style.content_margin_left = 12
+			style.content_margin_right = 12
+			option.add_theme_stylebox_override(state, style)
+		option.add_theme_color_override("font_pressed_color", PRIMARY)
+		option.add_theme_color_override("font_hover_pressed_color", PRIMARY)
 
 
 func _switch(title: String, description: String, value: bool, parent: Node) -> CheckButton:
@@ -323,43 +333,43 @@ func _divider(parent: Node) -> void:
 
 
 func show_about() -> void:
-	var column := _page_header("Об игре")
-	_text("Гидрологика / Hydrologic", column, 34, true, INK)
-	_text("Откройте резервуар и направляйте воду наклоном телефона. Проведите поток по спирали в красный сосуд. Для победы доставьте не менее 80% воды.", column, 30)
-	_text("Тёплые кромки отмечают ступени. Голубая линия на борту показывает его верхнюю границу. Резкие движения могут расплескать воду.", column)
-	_text("Пауза останавливает поток. Из неё можно начать заново или вернуться в главное меню.", column)
-	_text("Вода — первая жидкость прототипа. Дальше — новые свойства и взаимодействия.", column)
+	var column := _page_header(tr("ABOUT"))
+	_text(tr("ABOUT_NAME"), column, 34, true, INK)
+	_text(tr("ABOUT_GAMEPLAY"), column, 30)
+	_text(tr("ABOUT_HEIGHTS"), column)
+	_text(tr("ABOUT_PAUSE"), column)
+	_text(tr("ABOUT_FUTURE"), column)
 	_divider(column)
-	_text("Авторы игры", column, 30, true, INK)
+	_text(tr("AUTHORS"), column, 30, true, INK)
 	_text("Zakhar Govin\nCodex (OpenAI)", column, 32, false, INK)
-	_text("Версия 0.4.0\nGodot / godot-cpp · MIT\nNoto Sans · SIL OFL", column, 24)
+	_text(tr("VERSION") % str(ProjectSettings.get_setting("application/config/version")), column, 24)
 
 
 func show_pause() -> void:
 	field.active = false
 	field.reset()
-	var frame := _modal_card("Пауза", 580)
-	_button("Продолжить", Rect2(96, 508, 528, 104), true, func(): resume_requested.emit(), frame, "resume")
-	_button("Начать заново", Rect2(96, 636, 528, 104), false, func(): restart_requested.emit(), frame, "restart")
-	_button("В главное меню", Rect2(96, 764, 528, 104), false, func(): menu_requested.emit(), frame, "exit")
+	var frame := _modal_card(tr("PAUSE"), 580)
+	_button(tr("CONTINUE"), Rect2(96, 508, 528, 104), true, func(): resume_requested.emit(), frame, "resume")
+	_button(tr("RESTART"), Rect2(96, 636, 528, 104), false, func(): restart_requested.emit(), frame, "restart")
+	_button(tr("MAIN_MENU"), Rect2(96, 764, 528, 104), false, func(): menu_requested.emit(), frame, "exit")
 
 
 func show_win(fraction: float) -> void:
 	field.active = false
 	field.reset()
-	var frame := _modal_card("Уровень пройден", 500)
-	_center_label("В сосуде %d%% воды" % floori(fraction * 100.0), 490, 28, MUTED, false, frame)
-	_button("Ещё раз", Rect2(96, 574, 528, 104), true, func(): restart_requested.emit(), frame, "replay")
-	_button("В главное меню", Rect2(96, 702, 528, 104), false, func(): menu_requested.emit(), frame, "win_menu")
+	var frame := _modal_card(tr("WIN_TITLE"), 500)
+	_center_label(tr("WIN_VOLUME") % floori(fraction * 100.0), 490, 28, MUTED, false, frame)
+	_button(tr("REPLAY"), Rect2(96, 574, 528, 104), true, func(): restart_requested.emit(), frame, "replay")
+	_button(tr("MAIN_MENU"), Rect2(96, 702, 528, 104), false, func(): menu_requested.emit(), frame, "win_menu")
 
 
 func show_failure() -> void:
 	field.active = false
 	field.reset()
-	var frame := _modal_card("Вода расплескалась", 500)
-	_center_label("Оставшегося объёма недостаточно", 490, 26, MUTED, false, frame)
-	_button("Начать заново", Rect2(96, 574, 528, 104), true, func(): restart_requested.emit(), frame, "retry")
-	_button("В главное меню", Rect2(96, 702, 528, 104), false, func(): menu_requested.emit(), frame, "fail_menu")
+	var frame := _modal_card(tr("FAIL_TITLE"), 500)
+	_center_label(tr("FAIL_HINT"), 490, 26, MUTED, false, frame)
+	_button(tr("RESTART"), Rect2(96, 574, 528, 104), true, func(): restart_requested.emit(), frame, "retry")
+	_button(tr("MAIN_MENU"), Rect2(96, 702, 528, 104), false, func(): menu_requested.emit(), frame, "fail_menu")
 
 
 func _modal_card(title: String, height: float) -> Control:

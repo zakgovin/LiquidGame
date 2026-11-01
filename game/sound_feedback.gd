@@ -17,7 +17,7 @@ func _ready() -> void:
 		var player := AudioStreamPlayer.new()
 		player.stream = STREAMS[event]
 		player.max_polyphony = 3
-		player.volume_db = -3.0
+		player.volume_db = -9.0 if event == &"click" else -3.0
 		add_child(player)
 		players[event] = player
 

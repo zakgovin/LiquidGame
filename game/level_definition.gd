@@ -8,13 +8,14 @@ extends Resource
 @export var floor_elevations := PackedFloat32Array()
 @export var outline: PackedVector2Array
 @export var spawn: Rect2
+@export var reservoir_bounds: Rect2 = Rect2(-2.6, -4.5, 1.4, 1.8)
 @export var goal: Rect2
-@export var particle_count: int = 512
+@export var particle_count: int = 8192
 @export var required_fraction: float = 0.8
 @export var hold_seconds: float = 0.75
 @export var board_bounds: Rect2 = Rect2(-2.95, -4.9, 5.9, 9.8)
-@export var board_top: float = 0.82
-@export var base_height: float = -0.55
+@export var board_top: float = 1.19
+@export var base_height: float = -0.56
 @export var route: PackedVector2Array
 var _tiles: Array[Dictionary] = []
 var _walls: Array[PackedFloat32Array] = []

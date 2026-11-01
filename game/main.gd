@@ -12,16 +12,18 @@ var surface: FluidSurface
 var hud: HydrologicHUD
 var board: HydrologicBoard
 var sounds: SoundFeedback
+var camera: Camera3D
 var screen: Screen = Screen.MENU
 var running: bool = false
 var tilt_feedback: bool = true
+var language_code: String = "ru"
 var _render_tick: int = 0
 var _screenshot_frame: int = -1
 var _screenshot_path: String = ""
 var opening: bool = false
 var _opening_remaining: float = 0.0
 var _paused_from: Screen = Screen.PLAYING
-const OPEN_SECONDS: float = 0.42
+const OPEN_SECONDS: float = 0.70
 
 
 func _ready() -> void:
@@ -53,7 +55,7 @@ func _ready() -> void:
 	hud.about_requested.connect(_about)
 	hud.levels_requested.connect(_levels)
 	hud.level_selected.connect(func(_index: int): _menu())
-	hud.calibrate_requested.connect(_calibrate)
+	hud.language_changed.connect(_set_language)
 	hud.sensitivity_changed.connect(func(value: float):
 		controls.sensitivity = value
 		_save_settings())
@@ -80,20 +82,20 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	var tilt := controls.sample(delta)
-	if screen == Screen.READY and opening:
+	var world_tilt := input_to_world(tilt)
+	if screen == Screen.PLAYING and opening:
 		_opening_remaining = maxf(0.0, _opening_remaining - delta)
 		board.set_reservoir_open_amount(1.0 - _opening_remaining / OPEN_SECONDS)
+		simulation.set_gate_opening(1.0 - _opening_remaining / OPEN_SECONDS)
 		if _opening_remaining <= 0.0:
 			opening = false
-			running = true
-			screen = Screen.PLAYING
 			hud.show_game(controls.use_touch or not controls.has_sensor)
 	if running:
-		simulation.step(delta, tilt)
+		simulation.step(delta, world_tilt)
 		_render_tick += 1
 		if _render_tick % 2 == 0:
 			surface.rebuild(simulation.positions, LEVEL, simulation.active, simulation.native_solver())
-		hud.field.active = controls.use_touch or not controls.has_sensor
+		hud.field.active = not opening and (controls.use_touch or not controls.has_sensor)
 		if simulation.completed:
 			running = false
 			screen = Screen.WON
@@ -106,7 +108,7 @@ func _physics_process(delta: float) -> void:
 			hud.show_failure()
 	var target := Vector3.ZERO
 	if tilt_feedback and screen == Screen.PLAYING:
-		target = Vector3(tilt.y * MAX_TILT, 0.0, -tilt.x * MAX_TILT)
+		target = Vector3(world_tilt.y * MAX_TILT, 0.0, -world_tilt.x * MAX_TILT)
 	if screen != Screen.PAUSED:
 		pivot.rotation = pivot.rotation.lerp(target, 1.0 - exp(-7.5 * delta))
 	if _screenshot_frame > 0:
@@ -119,11 +121,30 @@ func _start() -> void:
 	_restart()
 
 
+func input_to_world(value: Vector2) -> Vector2:
+	if value.is_zero_approx(): return Vector2.ZERO
+	var right := camera.global_basis.x
+	var up := camera.global_basis.y
+	var determinant := right.x * -up.z - right.z * -up.x
+	var world := Vector2((value.x * -up.z - value.y * right.z) / determinant, (value.y * right.x + value.x * up.x) / determinant)
+	return world.normalized() * value.length()
+
+
+func world_to_input(value: Vector2) -> Vector2:
+	if value.is_zero_approx(): return Vector2.ZERO
+	var right := camera.global_basis.x
+	var up := camera.global_basis.y
+	return Vector2(right.x * value.x + right.z * value.y, -up.x * value.x - up.z * value.y).normalized() * value.length()
+
+
 func _release() -> void:
 	if screen != Screen.READY or opening: return
 	controls.calibrate()
 	controls.touch = Vector2.ZERO
 	opening = true
+	running = true
+	screen = Screen.PLAYING
+	simulation.set_gate_opening(0.0)
 	_opening_remaining = OPEN_SECONDS
 	hud.show_ready(true)
 	sounds.play_event(&"start")
@@ -158,7 +179,8 @@ func _resume() -> void:
 	controls.touch = Vector2.ZERO
 	screen = _paused_from
 	running = screen == Screen.PLAYING
-	if running: hud.show_game(controls.use_touch or not controls.has_sensor)
+	if running and opening: hud.show_ready(true)
+	elif running: hud.show_game(controls.use_touch or not controls.has_sensor)
 	else: hud.show_ready(opening)
 
 
@@ -176,7 +198,7 @@ func _settings() -> void:
 	screen = Screen.SETTINGS
 	pivot.hide()
 	controls.sensor_vector()
-	hud.show_settings(controls.sensitivity, controls.use_touch, tilt_feedback, controls.has_sensor, sounds.enabled)
+	hud.show_settings(controls.sensitivity, controls.use_touch, tilt_feedback, controls.has_sensor, sounds.enabled, language_code)
 
 
 func _levels() -> void:
@@ -193,9 +215,14 @@ func _about() -> void:
 	hud.show_about()
 
 
-func _calibrate() -> void:
-	controls.calibrate()
-	hud.calibration_done()
+func _set_language(code: String) -> void:
+	if code not in ["ru", "en"]: return
+	var scroll_position := hud.settings_scroll.scroll_vertical
+	language_code = code
+	TranslationServer.set_locale(code)
+	_save_settings()
+	_settings()
+	hud.settings_scroll.set_deferred("scroll_vertical", scroll_position)
 
 
 func _back() -> void:
@@ -211,8 +238,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_back()
 		elif event.keycode == KEY_R and (screen == Screen.PLAYING or screen == Screen.READY):
 			_restart()
-		elif event.keycode == KEY_C and screen == Screen.SETTINGS:
-			_calibrate()
 
 
 func _notification(what: int) -> void:
@@ -234,6 +259,15 @@ func _setup_environment() -> void:
 	environment.ambient_light_color = Color("e2f0f5")
 	environment.ambient_light_energy = 0.28
 	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	var sky := Sky.new()
+	var sky_material := ProceduralSkyMaterial.new()
+	sky_material.sky_top_color = Color("9dbad0")
+	sky_material.sky_horizon_color = Color("f3f8fa")
+	sky_material.ground_horizon_color = Color("e1edf2")
+	sky_material.ground_bottom_color = Color("a7bdc9")
+	sky.sky_material = sky_material
+	environment.sky = sky
+	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	world.environment = environment
 	add_child(world)
 	var sun := DirectionalLight3D.new()
@@ -254,14 +288,14 @@ func _setup_environment() -> void:
 	ground.position.y = -1.15
 	ground.material_override = HydrologicBoard._material(Color("eaf0ef"), 1.0)
 	add_child(ground)
-	var camera := Camera3D.new()
+	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
-	camera.size = 7.6
-	camera.position = Vector3(1.2, 15.4, 10.8)
+	camera.size = 9.9
+	camera.position = Vector3(7, 20, 16)
 	camera.far = 100.0
 	add_child(camera)
-	camera.look_at(Vector3(0, 0.25, 0))
+	camera.look_at(Vector3(0, 0.2, 0))
 	camera.current = true
 
 
@@ -271,6 +305,7 @@ func _save_settings() -> void:
 	config.set_value("controls", "use_touch", controls.use_touch)
 	config.set_value("visual", "tilt_feedback", tilt_feedback)
 	config.set_value("audio", "enabled", sounds.enabled)
+	config.set_value("locale", "language", language_code)
 	config.save("user://settings.cfg")
 
 
@@ -281,6 +316,9 @@ func _load_settings() -> void:
 		controls.use_touch = bool(config.get_value("controls", "use_touch", false))
 		tilt_feedback = bool(config.get_value("visual", "tilt_feedback", true))
 		sounds.set_enabled(bool(config.get_value("audio", "enabled", true)))
+		language_code = str(config.get_value("locale", "language", "ru"))
+	if language_code not in ["ru", "en"]: language_code = "ru"
+	TranslationServer.set_locale(language_code)
 
 
 func _capture() -> void:

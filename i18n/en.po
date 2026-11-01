@@ -1,0 +1,131 @@
+msgid ""
+msgstr "Project-Id-Version: Hydrologic 0.5.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+msgid "BRAND_TITLE"
+msgstr "HYDROLOGIC"
+
+msgid "BRAND_SUBTITLE"
+msgstr "F L O W  B Y  T I L T"
+
+msgid "PLAY"
+msgstr "Play"
+
+msgid "SETTINGS"
+msgstr "Settings"
+
+msgid "ABOUT"
+msgstr "About"
+
+msgid "LEVELS"
+msgstr "Levels"
+
+msgid "MAIN_MENU"
+msgstr "Main menu"
+
+msgid "PAUSE"
+msgstr "Pause"
+
+msgid "CONTINUE"
+msgstr "Continue"
+
+msgid "RESTART"
+msgstr "Restart"
+
+msgid "REPLAY"
+msgstr "Play again"
+
+msgid "RELEASE_WATER"
+msgstr "Release water"
+
+msgid "OPENING"
+msgstr "Opening…"
+
+msgid "READY_HINT"
+msgstr "Hold your phone comfortably.\nRelease the water when you are ready."
+
+msgid "LEVEL_FIRST_LOOP"
+msgstr "First Loop"
+
+msgid "CHOOSE_ROUTE"
+msgstr "Choose a route"
+
+msgid "LEVEL_ROUTE"
+msgstr "A full loop through a 3D channel.\nGuide the water over steps into the vessel."
+
+msgid "LEVEL_COUNT"
+msgstr "One level is currently available in the prototype."
+
+msgid "LANGUAGE"
+msgstr "Language"
+
+msgid "CONTROLS"
+msgstr "Controls"
+
+msgid "MODE_TILT"
+msgstr "Tilt"
+
+msgid "MODE_TOUCH"
+msgstr "Touch"
+
+msgid "SENSITIVITY"
+msgstr "Sensitivity"
+
+msgid "SOFTER"
+msgstr "Gentler  0.5"
+
+msgid "FASTER"
+msgstr "Faster  1.8"
+
+msgid "CONTROL_HELP"
+msgstr "Your phone position is set as neutral when you release the water.\nAt ×1: a 6° neutral zone, full tilt at 36°."
+
+msgid "NO_SENSOR"
+msgstr "No motion sensor found. Touch control is available."
+
+msgid "FEEDBACK"
+msgstr "Feedback"
+
+msgid "TILT_FEEDBACK"
+msgstr "Board tilt"
+
+msgid "TILT_DESCRIPTION"
+msgstr "Gently tilt the scene with your phone"
+
+msgid "SOUNDS"
+msgstr "Game sounds"
+
+msgid "SOUND_DESCRIPTION"
+msgstr "Button taps, water release and level results"
+
+msgid "ABOUT_NAME"
+msgstr "Hydrologic"
+
+msgid "ABOUT_GAMEPLAY"
+msgstr "Release the water and tilt your phone to guide it through the spiral into the red vessel. Deliver at least 80% of the water to win."
+
+msgid "ABOUT_HEIGHTS"
+msgstr "Transparent walls keep the water visible. Edge markings show walls and steps. Sudden movements can spill water."
+
+msgid "ABOUT_PAUSE"
+msgstr "Pause stops the flow. You can restart the level or return to the main menu."
+
+msgid "ABOUT_FUTURE"
+msgstr "Water is the prototype's first liquid. More materials and interactions are planned."
+
+msgid "AUTHORS"
+msgstr "Game creators"
+
+msgid "VERSION"
+msgstr "Version %s\nGodot / godot-cpp · MIT\nNoto Sans · SIL OFL"
+
+msgid "WIN_TITLE"
+msgstr "Level complete"
+
+msgid "WIN_VOLUME"
+msgstr "%d%% of water delivered"
+
+msgid "FAIL_TITLE"
+msgstr "Water spilled"
+
+msgid "FAIL_HINT"
+msgstr "Not enough water remains"

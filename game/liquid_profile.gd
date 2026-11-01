@@ -1,17 +1,14 @@
 class_name LiquidProfile
 extends Resource
-## Volumetric fluid parameters, separate from level geometry. Density is the
-## dimensionless kernel rest density, not a claim about physical kg/m³.
+## One material in an incompressible grid. Density is kg/m³ and viscosity is
+## kinematic m²/s; other materials and mixing remain a separate future feature.
 
 @export var display_name: String = "Вода"
 @export var symbol: String = "H₂O"
-@export var color: Color = Color("16b3df")
-@export var rest_density: float = 6.8
-@export var viscosity: float = 1.0
-@export var surface_tension: float = 0.012
-@export var interaction_radius: float = 0.174614
-@export var particle_spacing: float = 0.07937
-@export var particle_radius: float = 0.0412724
-@export var drag: float = 0.04
-@export var max_speed: float = 2.2
-@export_range(2, 6) var solver_iterations: int = 3
+@export var color: Color = Color("2c9fc9")
+@export var rest_density: float = 1000.0
+@export var viscosity: float = 0.000001
+@export var particle_spacing: float = 0.038
+@export var particle_radius: float = 0.017
+@export var drag: float = 0.015
+@export var max_speed: float = 3.0

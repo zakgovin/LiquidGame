@@ -14,7 +14,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	custom_minimum_size = Vector2(624, 412)
 	var title := Label.new()
-	title.text = "ГИДРОЛОГИКА"
+	title.text = tr("BRAND_TITLE")
 	title.position = Vector2(24, 246)
 	title.size = Vector2(576, 68)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -24,7 +24,7 @@ func _ready() -> void:
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(title)
 	var subtitle := Label.new()
-	subtitle.text = "H Y D R O L O G I C"
+	subtitle.text = tr("BRAND_SUBTITLE")
 	subtitle.position = Vector2(24, 326)
 	subtitle.size = Vector2(576, 40)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

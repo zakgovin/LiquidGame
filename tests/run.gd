@@ -49,7 +49,7 @@ func sensor_angle(degrees: float) -> void:
 
 func release_water(game: Node) -> void:
 	game._release()
-	for frame: int in range(27): game._physics_process(1.0 / 60.0)
+	for frame: int in range(ceil(game.OPEN_SECONDS * 60) + 2): game._physics_process(1.0 / 60.0)
 
 
 func _run() -> void:
@@ -64,7 +64,13 @@ func _run() -> void:
 		high = maxf(high, point.y)
 	check(high - low > WATER.particle_spacing * 0.9, "Source contains multiple vertical particle layers")
 	check(LEVEL.elevation(0) - LEVEL.elevation(4) > 0.5 and LEVEL.board_top > LEVEL.elevation(0) + 0.3, "Level contains descending floors and finite-height walls")
-	check(advance(fluid, 300, Vector2.ZERO) and fluid.lost_count == 0, "Resting water keeps its complete volume for five seconds")
+	fluid.set_gate_opening(0.0)
+	var resting := center(fluid.positions)
+	check(advance(fluid, 300, Vector2.ZERO) and fluid.lost_count == 0, "Closed reservoir keeps all water for five seconds")
+	check(center(fluid.positions).distance_to(resting) < WATER.particle_spacing, "Hydrostatic water stays in the tank without creeping or collapsing")
+	check(fluid.maximum_divergence < 0.02 and fluid.pressure_iterations > 0, "Pressure projection enforces incompressibility at rest")
+	check(is_equal_approx(fluid.liquid_volume, LEVEL.particle_count * pow(WATER.particle_spacing, 3)), "Markers account for their physical water volume")
+	fluid.set_gate_opening(1.0)
 	var before := center(fluid.positions)
 	check(advance(fluid, 60, Vector2.DOWN), "One-second tilt stays finite and conserves accounted mass")
 	check(center(fluid.positions).z > before.z + 0.8, "Low-viscosity flow moves promptly through the channel")
@@ -86,19 +92,13 @@ func _run() -> void:
 	fluid.reset()
 	check(not fluid.completed and fluid.held_seconds == 0.0 and fluid.lost_count == 0, "Restart restores all water and clears completion")
 	check(advance(fluid, 120, Vector2(1000, -1000)), "Extreme input is clamped and leaves a finite simulation")
-	var reference := LiquidSimulation.new(LEVEL, WATER, false)
 	fluid.reset()
-	advance(reference, 12, Vector2(0.2, 0.4))
-	advance(fluid, 12, Vector2(0.2, 0.4))
-	var difference := 0.0
-	for i: int in range(fluid.positions.size()): difference = maxf(difference, fluid.positions[i].distance_to(reference.positions[i]))
-	check(difference < 0.002, "Native solver matches the independent GDScript reference over the initial flow")
-	advance(reference, 8, Vector2(0.2, 0.4))
-	advance(fluid, 8, Vector2(0.2, 0.4))
-	var mean_difference := 0.0
-	for i: int in range(fluid.positions.size()): mean_difference += fluid.positions[i].distance_to(reference.positions[i])
-	mean_difference /= fluid.positions.size()
-	check(mean_difference < WATER.particle_spacing * 0.04 and center(fluid.positions).distance_to(center(reference.positions)) < 0.002, "Longer native/reference flow agrees on the bulk motion within a small fraction of parcel spacing")
+	advance(fluid, 20, Vector2(0.2, 0.4))
+	var repeatable := fluid.positions.duplicate()
+	fluid.reset()
+	advance(fluid, 20, Vector2(0.2, 0.4))
+	check(repeatable == fluid.positions, "Reset reproduces the same initial flow without stale pressure or velocity")
+	check(fluid.maximum_divergence < 0.02 and fluid.liquid_cell_count > 100, "Moving water remains nearly divergence-free across many volume cells")
 	var one := LEVEL.duplicate() as LevelDefinition
 	one.particle_count = 1
 	var drop := LiquidSimulation.new(one, WATER)
@@ -114,7 +114,7 @@ func _run() -> void:
 	check(not accelerated_at_join, "Crossing connected floor sections adds no artificial forward impulse")
 	drop.set_particle(0, Vector3(-1.9, LEVEL.elevation(1) + WATER.particle_radius, 3.3), Vector3(0, 0, -2))
 	advance(drop, 30, Vector2.UP)
-	check(drop.positions[0].z > 3.14 and drop.positions[0].y < 0.35, "A riser blocks water from teleporting onto a higher floor")
+	check(drop.positions[0].z > 3.1 + WATER.particle_radius - 0.002 and drop.positions[0].y < 0.35, "A riser blocks water from teleporting onto a higher floor")
 	drop.set_particle(0, Vector3(2.5, LEVEL.elevation(2) + WATER.particle_radius, 0), Vector3(3, 0, 1))
 	advance(drop, 15, Vector2.ZERO)
 	check(drop.positions[0].x <= 2.601 - WATER.particle_radius and drop.positions[0].z > 0.14, "Side-wall contact preserves tangential flow")
@@ -127,6 +127,7 @@ func _run() -> void:
 	drop.set_particle(0, Vector3(4.5, -1.8, 0), Vector3.ZERO)
 	advance(drop, 30, Vector2.ZERO)
 	check(drop.lost_count == 1 and drop.is_unwinnable(), "Water spilled off the board is counted and can make a level unwinnable")
+	fluid.reset()
 	var mesh_data: Dictionary = fluid.native_solver().call("build_surface")
 	var vertices: PackedVector3Array = mesh_data.vertices
 	var normals: PackedVector3Array = mesh_data.normals
@@ -163,6 +164,14 @@ func _run() -> void:
 	check(not game.pivot.visible and is_equal_approx((game.hud.page.get_child(0) as ColorRect).color.a, 1.0), "Main menu hides all level geometry behind an opaque background")
 	check(game.hud.buttons.has_all(["play", "levels", "settings", "about"]), "Main menu exposes play, level navigation, settings and description")
 	game._settings()
+	check(not game.hud.buttons.has("calibrate"), "Calibration is automatic at release; settings has no redundant action")
+	check(game.hud.settings_scroll.vertical_scroll_mode == ScrollContainer.SCROLL_MODE_SHOW_NEVER, "Settings allows touch scrolling without drawing a scrollbar")
+	game.hud.buttons["language_en"].pressed.emit()
+	check(game.language_code == "en" and game.hud.buttons["back"].text == "Main menu", "Language switch immediately translates the interface to English")
+	game._load_settings()
+	check(game.language_code == "en" and TranslationServer.get_locale() == "en", "Language choice survives a settings reload")
+	game.hud.buttons["language_ru"].pressed.emit()
+	check(game.hud.buttons["back"].text == "В главное меню", "Russian remains fully selectable")
 	check(game.hud.slider.custom_minimum_size.y >= 96 and game.hud.feedback_toggle.custom_minimum_size.y >= 96, "Settings controls meet the 48 dp minimum touch target")
 	check(game.hud.buttons["back"].position.y == 32 and game.hud.buttons["back"].get_parent().offset_top == -168, "Main-menu navigation is anchored in the bottom bar")
 	game.hud.sound_toggle.button_pressed = false
@@ -206,17 +215,24 @@ func _run() -> void:
 	Input.set_gravity(Vector3.ZERO)
 	game._physics_process(0.1)
 	var gate_position: Vector3 = game.board.reservoir.get_child(0).position
+	var opening_water: PackedVector3Array = game.simulation.positions.duplicate()
 	game._pause()
 	game._physics_process(0.5)
-	check(game.board.reservoir.get_child(0).position == gate_position and game.simulation.positions == waiting, "Pause freezes the opening gate and waiting water")
+	check(game.board.reservoir.get_child(0).position == gate_position and game.simulation.positions == opening_water, "Pause freezes both moving gate and water")
 	game._resume()
-	for frame: int in range(27): game._physics_process(1.0 / 60.0)
-	check(not game.board.reservoir.visible and game.running, "Water starts after the gate is fully open")
+	for frame: int in range(ceil(game.OPEN_SECONDS * 60) + 2): game._physics_process(1.0 / 60.0)
+	check(game.board.gate_open_amount >= 0.999 and game.running and not game.opening, "Gate retracts completely while its fixed machinery remains")
 	check(game.running and game.hud.page == null and game.hud.buttons.size() == 1, "Gameplay contains only the scene, invisible input and pause button")
 	check(game.pivot.visible, "Play restores the visible 3D level")
 	game.controls.touch = Vector2.RIGHT
 	for frame: int in range(30): game._physics_process(1.0 / 60.0)
-	check(game.pivot.rotation.z < -0.02 and absf(game.pivot.rotation.z) <= game.MAX_TILT, "Tilting right lowers the right side, smoothly bounded to four degrees")
+	check(game.pivot.rotation.z < -0.02 and game.pivot.rotation.length() <= game.MAX_TILT + 0.001, "Screen-right inclination lowers the correct side with bounded visual feedback")
+	check(game.world_to_input(game.input_to_world(Vector2(0.7, -0.3))).distance_to(Vector2(0.7, -0.3)) < 0.0001, "Camera projection maps screen input and world gravity consistently")
+	var corners_fit := true
+	for point: Vector2 in [LEVEL.board_bounds.position, Vector2(LEVEL.board_bounds.end.x, LEVEL.board_bounds.position.y), LEVEL.board_bounds.end, Vector2(LEVEL.board_bounds.position.x, LEVEL.board_bounds.end.y)]:
+		var projected: Vector2 = game.camera.unproject_position(Vector3(point.x, LEVEL.board_top, point.y))
+		corners_fit = corners_fit and root.get_visible_rect().has_point(projected)
+	check(corners_fit, "Camera keeps every board corner inside the phone viewport")
 	check(game.surface.get_parent() == game.pivot, "Water and geometry tilt together")
 	game._pause()
 	old = game.simulation.positions.duplicate()
@@ -253,6 +269,7 @@ func _run() -> void:
 	check(game.screen == game.Screen.READY and not game.running and game.simulation.lost_count == 0, "Retry restores water inside the closed reservoir")
 	var heard: Array[StringName] = []
 	game.sounds.played.connect(func(event: StringName): heard.append(event))
+	check(game.sounds.players[&"click"].volume_db <= -9.0, "Button clicks are quieter than level cues")
 	game.sounds.play_event(&"click")
 	game._release()
 	check(heard.has(&"click") and heard.has(&"start"), "Button and release actions trigger distinct sound feedback")

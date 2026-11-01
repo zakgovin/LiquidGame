@@ -1,0 +1,131 @@
+msgid ""
+msgstr "Project-Id-Version: Hydrologic 0.5.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+msgid "BRAND_TITLE"
+msgstr "ГИДРОЛОГИКА"
+
+msgid "BRAND_SUBTITLE"
+msgstr "H Y D R O L O G I C"
+
+msgid "PLAY"
+msgstr "Играть"
+
+msgid "SETTINGS"
+msgstr "Настройки"
+
+msgid "ABOUT"
+msgstr "Об игре"
+
+msgid "LEVELS"
+msgstr "Уровни"
+
+msgid "MAIN_MENU"
+msgstr "В главное меню"
+
+msgid "PAUSE"
+msgstr "Пауза"
+
+msgid "CONTINUE"
+msgstr "Продолжить"
+
+msgid "RESTART"
+msgstr "Начать заново"
+
+msgid "REPLAY"
+msgstr "Ещё раз"
+
+msgid "RELEASE_WATER"
+msgstr "Открыть резервуар"
+
+msgid "OPENING"
+msgstr "Открываем…"
+
+msgid "READY_HINT"
+msgstr "Держите телефон удобно.\nОткройте резервуар, когда будете готовы."
+
+msgid "LEVEL_FIRST_LOOP"
+msgstr "Первый виток"
+
+msgid "CHOOSE_ROUTE"
+msgstr "Выберите маршрут"
+
+msgid "LEVEL_ROUTE"
+msgstr "Полный виток по объёмному каналу.\nСтупени, инерция и переливание в сосуд."
+
+msgid "LEVEL_COUNT"
+msgstr "В прототипе пока доступен один уровень."
+
+msgid "LANGUAGE"
+msgstr "Язык"
+
+msgid "CONTROLS"
+msgstr "Управление"
+
+msgid "MODE_TILT"
+msgstr "Наклон"
+
+msgid "MODE_TOUCH"
+msgstr "Касание"
+
+msgid "SENSITIVITY"
+msgstr "Чувствительность"
+
+msgid "SOFTER"
+msgstr "Мягче  0,5"
+
+msgid "FASTER"
+msgstr "Быстрее  1,8"
+
+msgid "CONTROL_HELP"
+msgstr "Положение телефона запоминается при открытии резервуара.\nПри ×1: 6° — спокойная зона, 36° — полный наклон."
+
+msgid "NO_SENSOR"
+msgstr "Датчик не найден. Доступно касание экрана."
+
+msgid "FEEDBACK"
+msgstr "Отклик"
+
+msgid "TILT_FEEDBACK"
+msgstr "Наклон поля"
+
+msgid "TILT_DESCRIPTION"
+msgstr "Слегка поворачивать сцену вслед за телефоном"
+
+msgid "SOUNDS"
+msgstr "Звуки игры"
+
+msgid "SOUND_DESCRIPTION"
+msgstr "Нажатия, открытие резервуара и результат уровня"
+
+msgid "ABOUT_NAME"
+msgstr "Гидрологика / Hydrologic"
+
+msgid "ABOUT_GAMEPLAY"
+msgstr "Откройте резервуар и направляйте воду наклоном телефона. Проведите поток по спирали в красный сосуд. Для победы доставьте не менее 80% воды."
+
+msgid "ABOUT_HEIGHTS"
+msgstr "Прозрачные стенки позволяют видеть воду. Кромки отмечают границы и ступени. Резкие движения могут расплескать воду."
+
+msgid "ABOUT_PAUSE"
+msgstr "Пауза останавливает поток. Из неё можно начать заново или вернуться в главное меню."
+
+msgid "ABOUT_FUTURE"
+msgstr "Вода — первая жидкость прототипа. Дальше — новые свойства и взаимодействия."
+
+msgid "AUTHORS"
+msgstr "Авторы игры"
+
+msgid "VERSION"
+msgstr "Версия %s\nGodot / godot-cpp · MIT\nNoto Sans · SIL OFL"
+
+msgid "WIN_TITLE"
+msgstr "Уровень пройден"
+
+msgid "WIN_VOLUME"
+msgstr "В сосуде %d%% воды"
+
+msgid "FAIL_TITLE"
+msgstr "Вода расплескалась"
+
+msgid "FAIL_HINT"
+msgstr "Оставшегося объёма недостаточно"
