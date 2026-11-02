@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.12.1\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.13.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -53,7 +53,7 @@ msgid "LEVEL_ROUTE"
 msgstr "A full loop through a 3D channel.\nGuide the water over steps into the vessel."
 
 msgid "LEVEL_COUNT"
-msgstr "Four levels are available in the prototype."
+msgstr "Nine levels are available in the prototype."
 
 msgid "LANGUAGE"
 msgstr "Language"
@@ -168,3 +168,33 @@ msgstr "Fork"
 
 msgid "FORK_ROUTE"
 msgstr "Split the stream and collect both parts.\nDelivered water stays in the protected receiver."
+
+msgid "LEVEL_CASCADE"
+msgstr "Cascade"
+
+msgid "CASCADE_ROUTE"
+msgstr "Descend, climb the ramp, then descend again.\nChange direction; the final vessel is open."
+
+msgid "LEVEL_IMPULSE"
+msgstr "Impulse"
+
+msgid "IMPULSE_ROUTE"
+msgstr "Gather the water and strike the spring gate with a strong jet.\nA gentle stream cannot open it; the final vessel is open."
+
+msgid "LEVEL_HOT_ZONE"
+msgstr "Hot Zone"
+
+msgid "HOT_ZONE_ROUTE"
+msgstr "Cross the heated bend without lingering.\nWater heats up, evaporates and escapes as vapor."
+
+msgid "LEVEL_FREEZE"
+msgstr "Freeze"
+
+msgid "FREEZE_ROUTE"
+msgstr "Freeze the water in the blue chamber, then cross the grate.\nThe receiver counts solid ice."
+
+msgid "LEVEL_THAW"
+msgstr "Thaw"
+
+msgid "THAW_ROUTE"
+msgstr "Carry the ice across the grate to the heater.\nMelt it before the narrow passage into the receiver."

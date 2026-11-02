@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="LevelDefinition" format=3]
+
+[ext_resource type="Script" path="res://game/level_definition.gd" id="1_jyl3c"]
+
+[resource]
+script = ExtResource("1_jyl3c")
+title = "LEVEL_HOT_ZONE"
+description = "HOT_ZONE_ROUTE"
+floor_regions = Array[Rect2]([Rect2(-2.4, -4.5, 1.4, 1.8), Rect2(-2.4, -2.7, 1.4, 3.2), Rect2(-2.4, 0.5, 4.7, 1.3), Rect2(0.9, 1.8, 1.4, 1.2), Rect2(0.8, 3, 1.6, 1.5)])
+floor_elevations = PackedFloat32Array(0.42, 0.28, 0.14, 0, -0.14)
+channel_widths = PackedFloat32Array()
+channel_end_widths = PackedFloat32Array()
+channel_elevations = PackedFloat32Array()
+heat_regions = Array[Dictionary]([{
+"bounds": AABB(-2.4, 0.12, 0.5, 2.8, 1.25, 1.3),
+"conductance": 4500.0,
+"temperature": 200.0
+}])
+camera_elevation = 72.0
+spawn = Rect2(-2.3000002, -4.4, 1.1999999, 1.5999999)
+reservoir_bounds = Rect2(-2.4, -4.5, 1.4, 1.8)
+goal = Rect2(0.8, 3, 1.6, 1.5)
+particle_count = 3072
+safe_goal = true
+reservoir_id = &"source_07"
+route = PackedVector2Array(-1.7, -3.6, -1.7, 1.15, 1.6, 1.15, 1.6, 3.6)

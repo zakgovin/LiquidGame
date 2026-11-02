@@ -13,6 +13,12 @@ extends Resource
 @export var channel_elevations := PackedFloat32Array()
 @export var void_regions: Array[Rect2] = []
 @export var spill_banks: Array[Rect2] = []
+@export var ramps: Array[Dictionary] = []
+@export var heat_regions: Array[Dictionary] = []
+@export var impact_gate: Dictionary = {}
+@export_enum("Water", "Ice") var initial_phase: int = 0
+@export var initial_temperature: float = 20.0
+@export_enum("Water", "Ice") var goal_phase: int = 0
 @export var camera_elevation: float = 65.0
 @export_range(0.1, 1.0) var rotation_tilt_strength: float = 1.0
 @export var outline: PackedVector2Array
@@ -47,7 +53,9 @@ func elevation(index: int) -> float:
 
 func contains(point: Vector2, margin: float = 0.0) -> bool:
 	for region: Rect2 in floor_regions:
-		if region.grow(-margin).has_point(point): return true
+		if region.grow(-margin + 0.00001).has_point(point): return true
+	for ramp: Dictionary in ramps:
+		if (ramp.bounds as Rect2).grow(-margin).has_point(point): return true
 	_prepare_ribbons()
 	for polygon: PackedVector2Array in _ribbons:
 		if Geometry2D.is_point_in_polygon(point, polygon):
@@ -62,7 +70,9 @@ func floor_height(point: Vector2) -> float:
 	if not board_bounds.has_point(point): return -INF
 	var result := board_top
 	for i: int in range(floor_regions.size()):
-		if floor_regions[i].has_point(point): result = minf(result, elevation(i))
+		if floor_regions[i].grow(0.00001).has_point(point): result = minf(result, elevation(i))
+	for ramp: Dictionary in ramps:
+		if (ramp.bounds as Rect2).grow(0.00001).has_point(point): result = minf(result, ramp_height(ramp, point))
 	_prepare_ribbons()
 	for i: int in range(_ribbons.size()):
 		if Geometry2D.is_point_in_polygon(point, _ribbons[i]): result = minf(result, _ribbon_heights[i])
@@ -70,6 +80,19 @@ func floor_height(point: Vector2) -> float:
 		for opening: Rect2 in void_regions:
 			if opening.has_point(point): return -INF
 	return result
+
+
+static func ramp_height(ramp: Dictionary, point: Vector2) -> float:
+	var rect: Rect2 = ramp.bounds
+	var axis: Vector2 = ramp.axis
+	var length := absf(axis.x * rect.size.x) + absf(axis.y * rect.size.y)
+	var offset := minf(0, axis.x * rect.size.x) + minf(0, axis.y * rect.size.y)
+	var t := clampf(((point - rect.position).dot(axis) - offset) / length, 0, 1)
+	return lerpf(float(ramp.start_height), float(ramp.end_height), t)
+
+
+func uses_polygons() -> bool:
+	return not channel_curves.is_empty() or not void_regions.is_empty() or not ramps.is_empty() or not impact_gate.is_empty() or not heat_regions.is_empty() or initial_phase != 0
 
 
 func is_void(point: Vector2) -> bool:
@@ -158,12 +181,16 @@ func _build_curved_geometry() -> void:
 	var shapes: Array[Dictionary] = []
 	for i: int in range(floor_regions.size()): shapes.append({"polygon": rectangle_polygon(floor_regions[i]), "height": elevation(i)})
 	for i: int in range(_ribbons.size()): shapes.append({"polygon": _ribbons[i], "height": _ribbon_heights[i]})
+	for i: int in range(ramps.size()): shapes.append({"polygon": rectangle_polygon(ramps[i].bounds), "height": minf(ramps[i].start_height, ramps[i].end_height), "ramp": i})
 	for i: int in range(shapes.size()):
 		var pieces: Array[PackedVector2Array] = [shapes[i].polygon]
 		for j: int in range(shapes.size()):
 			if shapes[j].height < shapes[i].height - 0.0001 or (j < i and is_equal_approx(shapes[j].height, shapes[i].height)):
 				pieces = _subtract(pieces, shapes[j].polygon)
-		for piece: PackedVector2Array in pieces: _floors.append({"polygon": piece, "height": shapes[i].height})
+		for piece: PackedVector2Array in pieces:
+			var face := {"polygon": piece, "height": shapes[i].height}
+			if shapes[i].has("ramp"): face.ramp = shapes[i].ramp
+			_floors.append(face)
 	for opening: Rect2 in void_regions:
 		var pieces: Array[PackedVector2Array] = [rectangle_polygon(opening)]
 		for shape: Dictionary in shapes: pieces = _subtract(pieces, shape.polygon)
@@ -214,13 +241,21 @@ func _build_curved_geometry() -> void:
 			var right := floor_height(midpoint - normal * 0.002)
 			if not is_finite(left): left = base_height
 			if not is_finite(right): right = base_height
-			if absf(left - right) < 0.0001: continue
+			if absf(left - right) < 0.002: continue
 			var qa := Vector2i(roundi(start.x * 10000), roundi(start.y * 10000))
 			var qb := Vector2i(roundi(end.x * 10000), roundi(end.y * 10000))
 			var key := "%s:%s" % [qa, qb] if (qa.x < qb.x or (qa.x == qb.x and qa.y < qb.y)) else "%s:%s" % [qb, qa]
 			if seen.has(key): continue
 			seen[key] = true
-			_walls.append(PackedFloat32Array([start.x, start.y, end.x, end.y, minf(left, right), maxf(left, right)]))
+			var low := minf(left, right)
+			if not ramps.is_empty():
+				# A ramp side extends below its midpoint. Use the lowest endpoint
+				# for collision coverage; the renderer draws the sloping bottom.
+				for point: Vector2 in [start.lerp(end, 0.001), end.lerp(start, 0.001)]:
+					for side: float in [-1.0, 1.0]:
+						var h := floor_height(point + normal * 0.002 * side)
+						low = minf(low, h if is_finite(h) else base_height)
+			_walls.append(PackedFloat32Array([start.x, start.y, end.x, end.y, low, maxf(left, right)]))
 
 
 func constrain_world(point: Vector3, _previous: Vector3, radius: float) -> Vector3:
@@ -268,7 +303,7 @@ func wall_segments() -> Array[PackedFloat32Array]:
 func _build_geometry() -> void:
 	if _geometry_ready: return
 	_geometry_ready = true
-	if not channel_curves.is_empty() or not void_regions.is_empty():
+	if uses_polygons():
 		_build_curved_geometry()
 		return
 	var xs: Array[float] = [board_bounds.position.x, board_bounds.end.x]

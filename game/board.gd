@@ -42,6 +42,10 @@ var _intake_phase: float = 0.0
 var _secured_seen: int = 0
 var _floor_support: Array[Dictionary] = []
 var step_patches: Array[Dictionary] = []
+var _impact_leaf: Node3D
+var _impact_status: StandardMaterial3D
+var _cold_lights: Array[StandardMaterial3D] = []
+var _intake_angle: float = 0.55
 
 
 static func _material(color: Color, roughness: float) -> StandardMaterial3D:
@@ -60,6 +64,7 @@ func _glass_material(alpha: float) -> ShaderMaterial:
 
 
 func build(level: LevelDefinition) -> void:
+	_intake_angle = 1.3 if level.goal_phase == 1 else 0.55
 	_glass = _glass_material(0.065)
 	_glass_edge = _glass_material(0.24)
 	contact_material.shader = preload("res://assets/materials/contact.gdshader")
@@ -70,6 +75,9 @@ func build(level: LevelDefinition) -> void:
 	var heights: Array[float] = []
 	for i: int in range(level.floor_regions.size()):
 		if not heights.has(level.elevation(i)): heights.append(level.elevation(i))
+	for ramp: Dictionary in level.ramps:
+		for height: float in [float(ramp.start_height), float(ramp.end_height)]:
+			if not heights.has(height): heights.append(height)
 	for height: float in level.channel_heights():
 		if not heights.has(height): heights.append(height)
 	heights.sort()
@@ -84,12 +92,15 @@ func build(level: LevelDefinition) -> void:
 		var material := _material(Color("e8dfca").lerp(Color("b9b09f"), depth * 0.5), 0.92)
 		floors[roundi(height * 10000)] = material
 		floor_materials.append(material)
-	if not level.channel_curves.is_empty() or not level.void_regions.is_empty():
+	if level.uses_polygons():
 		for face: Dictionary in level.floor_faces():
 			var centre := Vector2.ZERO
 			for point: Vector2 in face.polygon: centre += point
 			centre /= face.polygon.size()
-			_polygon(face.polygon, face.height, Vector3.UP, _glass if level.is_spill_bank(centre) else floors[roundi(face.height * 10000)])
+			if face.has("ramp"):
+				_ramp_polygon(face.polygon, level.ramps[face.ramp], floors[roundi(face.height * 10000)])
+			else:
+				_polygon(face.polygon, face.height, Vector3.UP, _glass if level.is_spill_bank(centre) else floors[roundi(face.height * 10000)])
 		for polygon: PackedVector2Array in level.glass_patches():
 			_polygon(polygon, level.board_top, Vector3.UP, _glass)
 			_polygon(polygon, level.base_height, Vector3.DOWN, _glass)
@@ -121,7 +132,14 @@ func build(level: LevelDefinition) -> void:
 		var opening := level.is_void(front) or level.is_void(back) or not level.board_bounds.has_point(front) or not level.board_bounds.has_point(back)
 		var spill_bank := level.is_spill_bank(front) or level.is_spill_bank(back)
 		var edge_material: Material = _glass if spill_bank or not step else _slab_edge
-		_quad(Vector3(a.x, low, a.y), Vector3(b.x, low, b.y), Vector3(b.x, high, b.y), Vector3(a.x, high, a.y), Vector3(normal.x, 0, normal.y), edge_material)
+		var low_a := low
+		var low_b := low
+		if not level.ramps.is_empty() and not step:
+			var start_height := level.floor_height(a.lerp(b, 0.002) + normal * 0.004)
+			var end_height := level.floor_height(b.lerp(a, 0.002) + normal * 0.004)
+			if is_finite(start_height): low_a = start_height
+			if is_finite(end_height): low_b = end_height
+		_quad(Vector3(a.x, low_a, a.y), Vector3(b.x, low_b, b.y), Vector3(b.x, high, b.y), Vector3(a.x, high, a.y), Vector3(normal.x, 0, normal.y), edge_material)
 		if spill_bank:
 			glass_faces += 1
 			_caps.append({"a": a, "b": b, "height": high, "normal": normal})
@@ -136,11 +154,12 @@ func build(level: LevelDefinition) -> void:
 			glass_faces += 1
 			_caps.append({"a": a, "b": b, "height": high, "normal": normal})
 			_mark_bank_jamb(level, a, b, low, high, normal)
-		if not opening and is_finite(level.floor_height(midpoint + normal * 0.06)):
+		if level.ramps.is_empty() and not opening and is_finite(level.floor_height(midpoint + normal * 0.06)):
 			_contact_strip(a, b, low, normal, 0.17 if not step else 0.11)
 
 	_finish_caps()
-	if level.channel_curves.is_empty() and level.void_regions.is_empty():
+	_build_ramp_guides(level)
+	if not level.uses_polygons():
 		_box(Vector3(level.board_bounds.size.x + 0.08, 0.08, level.board_bounds.size.y + 0.08), Vector3(level.board_bounds.get_center().x, level.base_height - 0.045, level.board_bounds.get_center().y), foundation)
 	var goal := level.goal
 	var top := level.board_top + 0.026
@@ -151,6 +170,8 @@ func build(level: LevelDefinition) -> void:
 		side.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for obstacle: AABB in level.obstacles: _build_lintel(level, obstacle)
 	if level.safe_goal: _build_safe_goal(level)
+	_build_thermal_plates(level)
+	if not level.impact_gate.is_empty(): _build_impact_gate(level)
 	_build_reservoir(level)
 	_build_spill_cues()
 	_finish_mesh()
@@ -193,9 +214,68 @@ func _build_safe_goal(level: LevelDefinition) -> void:
 	_triangle(centre + Vector3(0, 0, 0.17), centre + Vector3(-0.14, 0, -0.12), centre + Vector3(0.14, 0, -0.12), Vector3.UP, _red)
 
 
-func show_goal_intake(secured: int) -> void:
-	if secured > _secured_seen: _intake_phase = 1.0
+func show_goal_intake(secured: int, activity: bool = false) -> void:
+	if secured > _secured_seen or activity: _intake_phase = 1.0
 	_secured_seen = secured
+
+
+func _build_thermal_plates(level: LevelDefinition) -> void:
+	for region: Dictionary in level.heat_regions:
+		var bounds: AABB = region.bounds
+		if region.has("plate_bounds"):
+			var plate: Rect2 = region.plate_bounds
+			bounds.position.x = plate.position.x
+			bounds.position.z = plate.position.y
+			bounds.size.x = plate.size.x
+			bounds.size.z = plate.size.y
+		var cold := float(region.temperature) < 0
+		var centre := Vector2(bounds.get_center().x, bounds.get_center().z)
+		var floor_y := level.floor_height(centre)
+		var plate := _material(Color("263b45") if cold else Color("40372e"), 0.8)
+		var glow := _material(Color("56c7ed") if cold else Color("ef802e"), 0.5)
+		glow.emission_enabled = true
+		glow.emission = glow.albedo_color * 0.35
+		if cold: _cold_lights.append(glow)
+		_box(Vector3(bounds.size.x - 0.06, 0.018, bounds.size.z - 0.06), Vector3(centre.x, floor_y + 0.009, centre.y), plate)
+		for side: float in [-1.0, 1.0]:
+			_box(Vector3(bounds.size.x - 0.04, 0.018, 0.035), Vector3(centre.x, floor_y + 0.025, centre.y + side * (bounds.size.z * 0.5 - 0.035)), _steel)
+		var bars := maxi(3, floori(bounds.size.z / 0.22))
+		for i: int in range(bars):
+			var z := bounds.position.z + 0.10 + (bounds.size.z - 0.20) * i / maxf(1, bars - 1)
+			_box(Vector3(bounds.size.x - 0.18, 0.009, 0.022), Vector3(centre.x, floor_y + 0.024, z), glow)
+		var indicator := _box(Vector3(0.07, 0.06, bounds.size.z * 0.45), Vector3(bounds.position.x + 0.06, floor_y + 0.05, centre.y), glow)
+		indicator.name = "CoolingIndicator" if cold else "HeatingIndicator"
+
+
+func _build_impact_gate(level: LevelDefinition) -> void:
+	var gate := level.impact_gate
+	var frame := Node3D.new()
+	frame.name = "ImpulseGate"
+	frame.position = gate.hinge
+	var direction: Vector2 = gate.direction
+	frame.rotation.y = atan2(direction.x, direction.y)
+	add_child(frame)
+	var width: float = gate.width
+	var height: float = gate.height
+	_impact_leaf = Node3D.new()
+	_impact_leaf.name = "SpringLeaf"
+	frame.add_child(_impact_leaf)
+	_box(Vector3(width - 0.05, height, float(gate.thickness)), Vector3(0, -height * 0.5, 0), _steel, _impact_leaf)
+	_impact_status = _material(Color("de9d48"), 0.45)
+	_box(Vector3(width * 0.65, height * 0.34, 0.018), Vector3(0, -height * 0.5, -float(gate.thickness) * 0.5 - 0.01), _impact_status, _impact_leaf)
+	_box(Vector3(width + 0.14, 0.09, 0.11), Vector3.ZERO, _rim, frame)
+	for side: float in [-1.0, 1.0]:
+		_box(Vector3(0.07, height + 0.06, 0.09), Vector3(side * (width * 0.5 + 0.035), -height * 0.5, 0), _steel, frame)
+		for turn: int in range(5):
+			_box(Vector3(0.025, 0.15, 0.14), Vector3(side * (width * 0.5 + 0.03) + (turn - 2) * 0.035, 0.01, 0), _rim, frame)
+
+
+func show_mechanisms(angle: float, load: float, latched: bool, frozen: float) -> void:
+	if is_instance_valid(_impact_leaf):
+		_impact_leaf.rotation.x = -angle
+		_impact_status.albedo_color = Color("72c9a0") if latched else Color("de9d48").lerp(Color("f1d48b"), clampf(load, 0, 1))
+	for light: StandardMaterial3D in _cold_lights:
+		light.albedo_color = Color("56c7ed").lerp(Color("d8f6ff"), clampf(frozen, 0, 1))
 
 
 func _mark_bank_jamb(level: LevelDefinition, a: Vector2, b: Vector2, low: float, high: float, normal: Vector2) -> void:
@@ -240,6 +320,37 @@ func _finish_caps() -> void:
 		var n := Vector3(edge.normal.x, 0, edge.normal.y)
 		_quad(Vector3(ar.x, top - 0.035, ar.y), Vector3(br.x, top - 0.035, br.y), Vector3(br.x, top, br.y), Vector3(ar.x, top, ar.y), n, _glass_edge)
 		_quad(Vector3(al.x, top - 0.035, al.y), Vector3(bl.x, top - 0.035, bl.y), Vector3(bl.x, top, bl.y), Vector3(al.x, top, al.y), -n, _glass_edge)
+
+
+func _ramp_polygon(points: PackedVector2Array, ramp: Dictionary, material: Material) -> void:
+	var indices := Geometry2D.triangulate_polygon(points)
+	for i: int in range(0, indices.size(), 3):
+		var vertices: Array[Vector3] = []
+		for k: int in range(3):
+			var p := points[indices[i+k]]
+			vertices.append(Vector3(p.x, LevelDefinition.ramp_height(ramp, p), p.y))
+		var normal := (vertices[2] - vertices[0]).cross(vertices[1] - vertices[0]).normalized()
+		if normal.y < 0: normal = -normal
+		_triangle(vertices[0], vertices[1], vertices[2], normal, material)
+
+
+func _build_ramp_guides(level: LevelDefinition) -> void:
+	for ramp: Dictionary in level.ramps:
+		var rect: Rect2 = ramp.bounds
+		var axis: Vector2 = ramp.axis
+		var length := absf(axis.x * rect.size.x) + absf(axis.y * rect.size.y)
+		var start := rect.position + Vector2(rect.size.x if axis.x < 0 else 0.0, rect.size.y if axis.y < 0 else 0.0)
+		var cross_axis := Vector2(-axis.y, axis.x)
+		var across := rect.size.x if axis.x == 0 else rect.size.y
+		start += cross_axis * (across * 0.5 * (-1.0 if cross_axis.x < 0 or cross_axis.y < 0 else 1.0))
+		var markers := maxi(2, floori(length / 1.1))
+		for i: int in range(markers):
+			var centre := start + axis * length * float(i + 1) / (markers + 1)
+			var arrow := PackedVector2Array([centre + axis * 0.14, centre - axis * 0.10 - cross_axis * 0.10, centre - axis * 0.10 + cross_axis * 0.10])
+			var overlay := ramp.duplicate()
+			overlay.start_height = float(ramp.start_height) + 0.009
+			overlay.end_height = float(ramp.end_height) + 0.009
+			_ramp_polygon(arrow, overlay, _arrow_light)
 
 
 func _polygon(points: PackedVector2Array, y: float, normal: Vector3, material: Material) -> void:
@@ -465,7 +576,7 @@ func show_spills(points: PackedVector3Array) -> void:
 func advance_effects(delta: float) -> void:
 	_intake_phase = maxf(0.0, _intake_phase - delta * 3.0)
 	for i: int in range(_goal_flaps.size()):
-		_goal_flaps[i].rotation.y = _intake_phase * 0.55 * (-1.0 if i == 0 else 1.0)
+		_goal_flaps[i].rotation.y = _intake_phase * _intake_angle * (-1.0 if i == 0 else 1.0)
 	for i: int in range(_spill_cues.size()):
 		_spill_ages[i] += delta
 		var age := _spill_ages[i]
@@ -475,6 +586,7 @@ func advance_effects(delta: float) -> void:
 
 
 func clear_effects() -> void:
+	show_mechanisms(0, 0, false, 0)
 	_secured_seen = 0
 	_intake_phase = 0.0
 	for flap: Node3D in _goal_flaps: flap.rotation = Vector3.ZERO

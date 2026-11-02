@@ -9,7 +9,7 @@ permissions:
 jobs:
   prototype:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       HYDRO_TOOLS: ${{ github.workspace }}/.tools
     steps:
@@ -22,11 +22,15 @@ jobs:
         run: python3 scripts/setup.py --android
       - name: Import project
         run: ./scripts/godot.sh --headless --editor --import
-      - name: Physics, first-level completion, controls and lifecycle
+      - name: Physics, phase changes, controls and lifecycle
         run: ./scripts/godot.sh --headless --script res://tests/run.gd
+      - name: New levels through sensor input
+        run: ./scripts/godot.sh --headless --script res://tests/advanced_input.gd -- tilt
+      - name: New levels through rotation controls
+        run: ./scripts/godot.sh --headless --script res://tests/advanced_input.gd -- rotation
       - name: Build and verify debug APK
         run: ./scripts/build_android.sh
       - uses: actions/upload-artifact@v4
         with:
           name: hydrologic-android-debug
-          path: build/hydrologic-0.12.1-android.apk
+          path: build/hydrologic-0.13.0-android.apk

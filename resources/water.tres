@@ -14,4 +14,4 @@ particle_spacing = 0.038
 particle_radius = 0.017
 drag = 0.015
 max_speed = 3.2
-velocity_noise_limit = 0.4
+velocity_noise_limit = 0.40
