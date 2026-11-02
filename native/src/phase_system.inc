@@ -178,8 +178,12 @@ Basis impact_rotation() const { return impact_frame*Basis(Vector3(1,0,0),-impact
 Vector3 constrain_impact(Vector3 point,float r) const {
     if (!impact_enabled) return point;
     Basis frame=impact_rotation(); Vector3 local=frame.transposed().xform(point-impact_hinge);
-    local=collide_box(local,Vector3(-impact_width*.5f,-impact_height,-impact_thickness*.5f),Vector3(impact_width*.5f,0,impact_thickness*.5f),r);
-    return impact_hinge+frame.xform(local);
+    Vector3 corrected=collide_box(local,Vector3(-impact_width*.5f,-impact_height,-impact_thickness*.5f),Vector3(impact_width*.5f,0,impact_thickness*.5f),r);
+    Vector3 delta=corrected-local;
+    // Returning the transformed original point introduces round-off even
+    // kilometres from the leaf. A tiny false vertical correction then used
+    // to cancel falling velocity. Apply only a real collision displacement.
+    return delta.length_squared()>1e-14f ? point+frame.xform(delta) : point;
 }
 bool impact_contains(Vector3 p) const {
     if (!impact_enabled) return false;

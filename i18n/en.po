@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.14.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.15.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -53,7 +53,7 @@ msgid "LEVEL_ROUTE"
 msgstr "A full loop through a 3D channel.\nGuide the water over steps into the vessel."
 
 msgid "LEVEL_COUNT"
-msgstr "Nine levels are available in the prototype."
+msgstr "Ten levels are available in the prototype."
 
 msgid "LANGUAGE"
 msgstr "Language"
@@ -198,3 +198,9 @@ msgstr "Thaw"
 
 msgid "THAW_ROUTE"
 msgstr "Carry the ice across the grate, then quickly guide the melt through the heater.\nIt boils water as fast as Hot Zone; the receiver is open."
+
+msgid "LEVEL_FULL_CYCLE"
+msgstr "Full Cycle"
+
+msgid "FULL_CYCLE_ROUTE"
+msgstr "Guide both portions into the collector.\nOpen it, strike the gate, freeze, cross the grate and melt.\nOnly water in the final vessel counts."

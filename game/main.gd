@@ -1,7 +1,7 @@
 extends Node3D
 
 enum Screen { MENU, READY, PLAYING, PAUSED, SETTINGS, LEVELS, ABOUT, FINISHING, WON, FAILED }
-const LEVELS: Array[LevelDefinition] = [preload("res://resources/first_level.tres"), preload("res://resources/fourth_level.tres"), preload("res://resources/second_level.tres"), preload("res://resources/third_level.tres"), preload("res://resources/fifth_level.tres"), preload("res://resources/sixth_level.tres"), preload("res://resources/seventh_level.tres"), preload("res://resources/eighth_level.tres"), preload("res://resources/ninth_level.tres")]
+const LEVELS: Array[LevelDefinition] = [preload("res://resources/first_level.tres"), preload("res://resources/fourth_level.tres"), preload("res://resources/second_level.tres"), preload("res://resources/third_level.tres"), preload("res://resources/fifth_level.tres"), preload("res://resources/sixth_level.tres"), preload("res://resources/seventh_level.tres"), preload("res://resources/eighth_level.tres"), preload("res://resources/ninth_level.tres"), preload("res://resources/tenth_level.tres")]
 var level_index: int = 0
 var level: LevelDefinition = LEVELS[0]
 const WATER: LiquidProfile = preload("res://resources/water.tres")
@@ -26,6 +26,11 @@ var _screenshot_frame: int = -1
 var _screenshot_path: String = ""
 var opening: bool = false
 var _opening_remaining: float = 0.0
+var _opening_source: StringName = &""
+var _opened_sources: Dictionary = {}
+var _focus_center := Vector3.ZERO
+var _focus_rect := Rect2()
+var _focus_tick: int = 0
 var _paused_from: Screen = Screen.PLAYING
 const OPEN_SECONDS: float = 0.70
 const FINISH_SECONDS: float = 0.50
@@ -100,20 +105,22 @@ func _physics_process(delta: float) -> void:
 	var world_tilt := input_to_world(Vector2.DOWN * level.rotation_tilt_strength if controls.use_rotation else tilt)
 	if screen == Screen.PLAYING and opening:
 		_opening_remaining = maxf(0.0, _opening_remaining - delta)
-		board.set_reservoir_open_amount(1.0 - _opening_remaining / OPEN_SECONDS)
-		simulation.set_gate_opening(minf((1.0 - _opening_remaining / OPEN_SECONDS) / 0.30, 1.0))
+		board.set_source_open_amount(_opening_source, 1.0 - _opening_remaining / OPEN_SECONDS)
+		simulation.set_source_opening(_opening_source, minf((1.0 - _opening_remaining / OPEN_SECONDS) / 0.30, 1.0))
 		if _opening_remaining <= 0.0:
 			opening = false
 			hud.show_game(controls.use_rotation)
 	if running:
 		simulation.step(delta, world_tilt)
-		board.show_goal_intake(simulation.secured_count, simulation.intake_activity)
+		if not level.collection_source.is_empty():
+			board.set_source_ready(level.collection_source, simulation.source_fill.get(level.collection_source,0) >= ceili(level.required_fraction*level.particle_count))
+		board.show_goal_intake(simulation.secured_count + int(simulation.source_fill.get(level.collection_source,0)), simulation.intake_activity)
 		board.show_mechanisms(simulation.impact_angle, simulation.impact_load, simulation.impact_latched, simulation.freeze_progress)
 		board.show_spills(simulation.spill_points)
 		_render_tick += 1
-		if _render_tick % 2 == 0:
+		if _render_tick % 2 == 0 and DisplayServer.get_name() != "headless":
 			surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
-		hud.field.active = not opening and (controls.use_rotation)
+		hud.field.active = not opening and (controls.use_rotation or not level.sources.is_empty())
 		if simulation.completed:
 			_begin_finish(world_tilt)
 			return
@@ -126,11 +133,11 @@ func _physics_process(delta: float) -> void:
 		# Let the tail of the stream reach the vessel before measuring the
 		# result. The quiet interval is real foreground time, not fluid time.
 		simulation.settle(delta, _finish_tilt)
-		board.show_goal_intake(simulation.secured_count, simulation.intake_activity)
+		board.show_goal_intake(simulation.secured_count + int(simulation.source_fill.get(level.collection_source,0)), simulation.intake_activity)
 		board.show_mechanisms(simulation.impact_angle, simulation.impact_load, simulation.impact_latched, simulation.freeze_progress)
 		board.show_spills(simulation.spill_points)
 		_render_tick += 1
-		if _render_tick % 2 == 0:
+		if _render_tick % 2 == 0 and DisplayServer.get_name() != "headless":
 			surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
 		_finish_elapsed += delta
 		if simulation.delivered_count > _finish_delivered + 8:
@@ -146,6 +153,7 @@ func _physics_process(delta: float) -> void:
 			screen = Screen.WON
 			sounds.play_event(&"complete")
 			hud.show_win(simulation.delivered_count, level.particle_count, simulation.lost_count, level_index + 1 < LEVELS.size())
+	surface.set_flow_time(simulation.elapsed_seconds)
 	if screen != Screen.PAUSED:
 		_update_camera(delta)
 		board.advance_effects(delta)
@@ -197,6 +205,9 @@ func _fit_camera() -> void:
 
 
 func _update_camera(_delta: float) -> void:
+	if not level.camera_zones.is_empty():
+		_update_course_camera(_delta)
+		return
 	_fit_camera()
 	camera.size = _camera_size
 	camera.h_offset = _camera_horizontal
@@ -220,19 +231,20 @@ func _configure_camera() -> void:
 
 
 func _rotation_vector(point: Vector2) -> Vector2:
-	var hit: Variant = Plane(Vector3.UP, 0.35).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
-	return Vector2(hit.x, hit.z) if hit is Vector3 else Vector2.ZERO
+	var centre := pivot.to_global(_focus_center) if not level.camera_zones.is_empty() else Vector3(0,0.35,0)
+	var hit: Variant = Plane(Vector3.UP, centre.y).intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
+	return Vector2(hit.x-centre.x,hit.z-centre.z) if hit is Vector3 else Vector2.ZERO
 
 
 func _tap_field(point: Vector2) -> void:
-	if screen != Screen.READY or opening: return
+	if screen not in [Screen.READY,Screen.PLAYING] or opening: return
 	var source := board.pick_source(camera.project_ray_origin(point), camera.project_ray_normal(point))
 	if not source.is_empty(): _release(source)
 
 
 func _position_source_hint() -> void:
 	if screen != Screen.READY: return
-	hud.position_source_hint(camera.unproject_position(board.to_global(board.source_anchor(level.reservoir_id))))
+	hud.position_source_hint(camera.unproject_position(board.to_global(board.source_anchor(_next_source()))))
 
 
 func _rotate_field(amount: float) -> void:
@@ -280,6 +292,9 @@ func _build_level() -> void:
 		pivot.add_child(surface)
 	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
 	_fit_viewport = Vector2.ZERO
+	_focus_rect = Rect2()
+	_focus_center = Vector3.ZERO
+	_opened_sources.clear()
 
 
 func _change_level(index: int) -> bool:
@@ -324,12 +339,16 @@ func world_to_input(value: Vector2) -> Vector2:
 
 func _release(source: StringName = &"") -> void:
 	if source.is_empty(): source = level.reservoir_id
-	if screen != Screen.READY or opening or source != level.reservoir_id: return
-	controls.calibrate()
+	if screen not in [Screen.READY,Screen.PLAYING] or opening or not board.source_targets.has(source) or _opened_sources.has(source): return
+	if level.sources.is_empty() and screen != Screen.READY: return
+	if source == level.collection_source and simulation.source_fill.get(source,0) < ceili(level.required_fraction*level.particle_count): return
+	if screen == Screen.READY: controls.calibrate()
+	_opened_sources[source] = true
+	_opening_source = source
 	opening = true
 	running = true
 	screen = Screen.PLAYING
-	simulation.set_gate_opening(0.0)
+	simulation.set_source_opening(source,0.0)
 	_opening_remaining = OPEN_SECONDS
 	hud.show_ready(true, controls.use_rotation)
 	sounds.play_event(&"start")
@@ -337,14 +356,17 @@ func _release(source: StringName = &"") -> void:
 
 func _restart() -> void:
 	simulation.reset()
-	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
+	_opened_sources.clear()
+	_opening_source = &""
+	_focus_rect = Rect2()
+	_focus_center = Vector3.ZERO
 	pivot.show()
 	controls.filtered = Vector2.ZERO
 	pivot.rotation = Vector3.ZERO
 	rotation_angle = 0.0
 	turntable.rotation = Vector3.ZERO
 	_configure_camera()
-	board.set_reservoir_open_amount(0.0)
+	board.reset_sources()
 	board.set_goal_complete(false)
 	board.clear_effects()
 	finish_remaining = 0.0
@@ -353,6 +375,7 @@ func _restart() -> void:
 	screen = Screen.READY
 	hud.show_ready(false, controls.use_rotation)
 	_update_camera(0.0)
+	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
 	_position_source_hint()
 
 
@@ -522,3 +545,78 @@ func _capture() -> void:
 	var error := image.save_png(_screenshot_path)
 	print("Capture: ", _screenshot_path, " status=", error)
 	get_tree().quit(error)
+
+
+func _next_source() -> StringName:
+	for source: Dictionary in level.sources:
+		if not _opened_sources.has(source.id): return source.id
+	return level.reservoir_id
+
+
+func _course_focus() -> Rect2:
+	if screen == Screen.READY: return level.camera_zones[0]
+	var bank_fill: int = simulation.source_fill.get(level.collection_source,0)
+	var waiting_focus := Rect2()
+	# Stored water is protected. Return to the remaining sealed half when
+	# the first stream has arrived, rather than following droplets forever.
+	if not _opened_sources.has(level.collection_source):
+		for source: Dictionary in level.sources:
+			if source.fill > 0.0 and not _opened_sources.has(source.id):
+				waiting_focus=level.camera_zones[0]
+				if bank_fill >= level.particle_count*0.40: return waiting_focus
+		if bank_fill >= level.particle_count*level.required_fraction: return Rect2(-3.0,3.8,6.0,8.0)
+	var xs: Array[float] = []
+	var zs: Array[float] = []
+	for i: int in range(simulation.positions.size()):
+		if simulation.active[i] == 0 or simulation.phases[i] == 2: continue
+		var p := simulation.positions[i]
+		var excluded := false
+		for source: Dictionary in level.sources:
+			if not _opened_sources.has(source.id) and (source.bounds as Rect2).has_point(Vector2(p.x,p.z)):
+				excluded = true
+				break
+		if excluded: continue
+		xs.append(p.x)
+		zs.append(p.z)
+	if waiting_focus.has_area() and xs.size()<level.particle_count*0.08: return waiting_focus
+	if xs.is_empty(): return _focus_rect if _focus_rect.has_area() else level.camera_zones[0]
+	xs.sort()
+	zs.sort()
+	var low := int(xs.size()*0.03)
+	var high := mini(xs.size()-1,int(xs.size()*0.97))
+	var centre := Vector2((xs[low]+xs[high])*0.5,(zs[low]+zs[high])*0.5)
+	var extent := Vector2(clampf(xs[high]-xs[low]+2.0,5.4,9.2),clampf(zs[high]-zs[low]+3.0,8.0,12.0))
+	return Rect2(centre-extent*0.5,extent)
+
+
+func _update_course_camera(delta: float) -> void:
+	_focus_tick += 1
+	if _focus_tick%12 == 0 or not _focus_rect.has_area(): _focus_rect = _course_focus()
+	var centre := _focus_rect.get_center()
+	var destination := Vector3(centre.x,0.35,centre.y)
+	var weight := 1.0 if delta <= 0.0 else 1.0-exp(-2.2*delta)
+	_focus_center = _focus_center.lerp(destination,weight)
+	var target := pivot.to_global(_focus_center)
+	var elevation := deg_to_rad(73.0)
+	var arm := Vector3(cos(elevation)*32.0/sqrt(2.0),sin(elevation)*32.0,cos(elevation)*32.0/sqrt(2.0)) if controls.use_rotation else Vector3(2.8,24,14)
+	camera.position = target+arm
+	camera.look_at(target)
+	camera.h_offset = 0.0
+	camera.v_offset = 0.0
+	var viewport_size := get_viewport().get_visible_rect().size
+	var extent := Vector2.ZERO
+	var half := _focus_rect.size*0.5
+	# A rotation-invariant cylinder keeps framing stable while turning.
+	if controls.use_rotation:
+		var radius := half.length()
+		extent = Vector2(radius*2.0,radius*2.0*sin(elevation)+2.0*cos(elevation))
+	else:
+		for x: float in [-half.x,half.x]:
+			for z: float in [-half.y,half.y]:
+				var point := Vector3(x,0,z)
+				extent.x = maxf(extent.x,absf(camera.basis.x.dot(point))*2.0)
+				extent.y = maxf(extent.y,absf(camera.basis.y.dot(point))*2.0+1.5)
+	var size_target := maxf(extent.x*1.08,extent.y*viewport_size.x/maxf(300,viewport_size.y-184.0))
+	camera.size = lerpf(camera.size,size_target,weight)
+	camera.v_offset = 0.045*camera.size
+	hud.field.centre = camera.unproject_position(target)

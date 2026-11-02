@@ -9,7 +9,7 @@ permissions:
 jobs:
   prototype:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
       HYDRO_TOOLS: ${{ github.workspace }}/.tools
     steps:
@@ -24,6 +24,12 @@ jobs:
         run: ./scripts/godot.sh --headless --editor --import
       - name: Physics, phase changes, controls and lifecycle
         run: ./scripts/godot.sh --headless --script res://tests/run.gd
+      - name: Water volume, optical depth and independent reservoir controls
+        run: |
+          ./scripts/godot.sh --headless --script res://tests/water_optics.gd
+          ./scripts/godot.sh --headless --script res://tests/final_input.gd
+      - name: Complete final course with the original water
+        run: ./scripts/godot.sh --headless --script res://tests/final_course.gd
       - name: New levels through sensor input
         run: ./scripts/godot.sh --headless --script res://tests/advanced_input.gd -- tilt
       - name: New levels through rotation controls
@@ -33,4 +39,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: hydrologic-android-debug
-          path: build/hydrologic-0.14.0-android.apk
+          path: build/hydrologic-0.15.0-android.apk

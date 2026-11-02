@@ -36,6 +36,10 @@ func _init(profile: LiquidProfile = null) -> void:
 
 func rebuild(_particles: PackedVector3Array, _level: LevelDefinition, _active: PackedByteArray = PackedByteArray(), solver: RefCounted = null) -> void:
 	assert(solver != null)
+	var camera := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if camera != null:
+		var inverse := global_basis.inverse()
+		solver.call("set_render_axes", inverse * camera.global_basis.x, inverse * camera.global_basis.y)
 	_fill_mesh(_mesh, solver.call("build_surface"))
 	_ice.hide()
 	_vapor.hide()
@@ -69,3 +73,7 @@ func _fill_mesh(target: ArrayMesh, data: Dictionary) -> void:
 	arrays[Mesh.ARRAY_NORMAL] = data.normals
 	arrays[Mesh.ARRAY_COLOR] = data.colors
 	target.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+
+func set_flow_time(seconds: float) -> void:
+	(material_override as ShaderMaterial).set_shader_parameter("flow_time", seconds)

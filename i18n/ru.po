@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.14.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.15.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "ГИДРОЛОГИКА"
@@ -53,7 +53,7 @@ msgid "LEVEL_ROUTE"
 msgstr "Полный виток по объёмному каналу.\nСтупени, инерция и переливание в сосуд."
 
 msgid "LEVEL_COUNT"
-msgstr "В прототипе доступны девять уровней."
+msgstr "В прототипе доступны десять уровней."
 
 msgid "LANGUAGE"
 msgstr "Язык"
@@ -198,3 +198,9 @@ msgstr "Оттепель"
 
 msgid "THAW_ROUTE"
 msgstr "Доставьте лёд через решётку и быстро проведите талую воду через нагреватель.\nОн испаряет воду так же, как в «Горячей зоне»; приёмник открыт."
+
+msgid "LEVEL_FULL_CYCLE"
+msgstr "Полный цикл"
+
+msgid "FULL_CYCLE_ROUTE"
+msgstr "Соберите обе порции в накопителе.\nОткройте его, ударьте по заслонке, заморозьте воду,\nпройдите решётку и растопите лёд. Цель — последний сосуд."

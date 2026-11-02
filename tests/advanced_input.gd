@@ -59,9 +59,9 @@ func _advanced() -> void:
 		game.pivot.add_child(game.surface)
 	game._levels()
 	var all_buttons := true
-	for number: int in range(9): all_buttons = all_buttons and game.hud.buttons.has("level_%d" % number)
-	check(all_buttons and game.LEVELS.size() == 9, "All nine playable levels are exposed in the selection menu")
-	await snapshot("v0140-nine-levels")
+	for number: int in range(10): all_buttons = all_buttons and game.hud.buttons.has("level_%d" % number)
+	check(all_buttons and game.LEVELS.size() == 10, "All ten playable levels are exposed in the selection menu")
+	await snapshot("v0150-ten-levels")
 	game._menu()
 	for number: int in selected:
 		game._select_level(number - 1)
@@ -134,7 +134,7 @@ func _advanced() -> void:
 		if number == 9: check(saw_melt and f.water_count > game.level.particle_count * 0.8, "Thaw visibly passes through solid and liquid phases before delivery")
 		if number == 7: check(f.secured_count == f.delivered_count, "Delivered mass remains secured in the protected receiver")
 		else: check(f.secured_count == 0, "The open receiver does not secretly capture delivered mass")
-		check(game.hud.buttons.has("next") == (number < 9), "Only available next levels are offered")
+		check(game.hud.buttons.has("next") == (number < game.LEVELS.size()), "Only available next levels are offered")
 		await snapshot("v0140-level-%d-victory" % number)
 		game._menu()
 	game._select_level(8)

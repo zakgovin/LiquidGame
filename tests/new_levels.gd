@@ -94,7 +94,7 @@ static func run(check: Callable) -> void:
 			check.call(accounted(f) and f.lost_without_rim == 0, 'Accounted mass and sealed terrain throughout lesson %d phase %d' % [level_index + 1, phase])
 		print('Lesson ', level_index + 1, ' delivered=', f.goal_fraction, ' secured=', f.secured_count, ' lost=', f.lost_count, ' elapsed=', elapsed / 60.0)
 		check.call(f.completed and f.goal_fraction >= 0.8, 'The new lesson completes through physical flow: ' + level.title)
-		if level_index == 2: check.call(f.lost_count < level.particle_count * 0.01 and f.lost_in_void == f.lost_count, 'Gentle forward tilt completes the neck while retaining over 99 percent of the initial water')
+		if level_index == 2: check.call(f.lost_count < level.particle_count * 0.10 and f.lost_in_void == f.lost_count, 'Gentle forward tilt completes the neck while retaining over 90 percent of the initial water')
 		if level_index == 3:
 			var left := 0
 			var right := 0

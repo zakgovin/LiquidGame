@@ -32,6 +32,10 @@ extends Resource
 @export var hold_seconds: float = 0.75
 @export var flow_speed: float = 1.15
 @export var reservoir_id: StringName = &"source_01"
+## Optional independently sealed sources. Empty retains the original levels.
+@export var sources: Array[Dictionary] = []
+@export var collection_source: StringName = &""
+@export var camera_zones: Array[Rect2] = []
 @export var board_bounds: Rect2 = Rect2(-2.95, -4.9, 5.9, 9.8)
 @export var board_top: float = 1.26
 @export var base_height: float = -0.56

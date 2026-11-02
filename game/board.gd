@@ -32,6 +32,8 @@ var _open_light: StandardMaterial3D
 var hazard_edges: Array[Node3D] = []
 var _step_lower := ShaderMaterial.new()
 var source_targets: Dictionary = {}
+var source_lids: Dictionary = {}
+var primary_source: StringName = &""
 var _spill_cues: Array[MeshInstance3D] = []
 var _spill_ages: Array[float] = []
 var _spill_material: StandardMaterial3D
@@ -180,7 +182,26 @@ func build(level: LevelDefinition) -> void:
 	if level.safe_goal: _build_safe_goal(level)
 	_build_thermal_plates(level)
 	if not level.impact_gate.is_empty(): _build_impact_gate(level)
-	_build_reservoir(level)
+	primary_source = level.reservoir_id
+	if level.sources.is_empty():
+		_build_reservoir(level)
+	else:
+		for source: Dictionary in level.sources:
+			var fixture := LevelDefinition.new()
+			fixture.reservoir_id = source.id
+			fixture.reservoir_bounds = source.bounds
+			fixture.floor_elevations = PackedFloat32Array([float(source.height)])
+			fixture.board_top = level.board_top
+			fixture.board_bounds = level.board_bounds
+			_build_reservoir(fixture)
+			if source.id == level.collection_source:
+				fixture.goal = source.bounds
+				fixture.floor_regions = [source.bounds]
+				_build_safe_goal(fixture, false)
+		var first: Dictionary = source_lids[primary_source]
+		_gate = first.gate
+		_lid_closed = first.closed
+		_status = first.status
 	_build_spill_cues()
 	_finish_mesh()
 
@@ -196,17 +217,18 @@ func _build_lintel(level: LevelDefinition, box: AABB) -> void:
 		_box(Vector3(box.size.x + 0.10, 0.025, 0.035), Vector3(box.get_center().x, bottom + 0.006, z), _steel)
 
 
-func _build_safe_goal(level: LevelDefinition) -> void:
+func _build_safe_goal(level: LevelDefinition, covered: bool = true) -> void:
 	var g := level.goal
+	var accent: Material = _red if covered else _steel
 	var floor_y := level.floor_height(g.get_center())
 	var roof := level.board_top + 0.05
-	_box(Vector3(g.size.x, 0.08, g.size.y), Vector3(g.get_center().x, roof, g.get_center().y), _glass)
+	if covered: _box(Vector3(g.size.x, 0.08, g.size.y), Vector3(g.get_center().x, roof, g.get_center().y), _glass)
 	for x: float in [g.position.x, g.end.x]:
 		_box(Vector3(0.04, 0.04, g.size.y), Vector3(x, roof + 0.05, g.get_center().y), _steel)
-		_box(Vector3(0.035, 0.025, g.size.y), Vector3(x, floor_y + 0.012, g.get_center().y), _red)
+		_box(Vector3(0.035, 0.025, g.size.y), Vector3(x, floor_y + 0.012, g.get_center().y), accent)
 		for z: float in [g.position.y, g.end.y]:
 			_box(Vector3(0.035, roof - floor_y, 0.035), Vector3(x, (roof + floor_y) * 0.5, z), _steel)
-	_box(Vector3(g.size.x, 0.025, 0.035), Vector3(g.get_center().x, floor_y + 0.012, g.end.y), _red)
+	_box(Vector3(g.size.x, 0.025, 0.035), Vector3(g.get_center().x, floor_y + 0.012, g.end.y), accent)
 	_box(Vector3(g.size.x + 0.04, 0.04, 0.04), Vector3(g.get_center().x, roof + 0.05, g.position.y), _steel)
 	for side: int in range(2):
 		var hinge := Node3D.new()
@@ -219,7 +241,7 @@ func _build_safe_goal(level: LevelDefinition) -> void:
 		_goal_flaps.append(hinge)
 	# An inset arrow on the receiver floor makes the allowed direction clear.
 	var centre := Vector3(g.get_center().x, floor_y + 0.009, g.position.y + 0.30)
-	_triangle(centre + Vector3(0, 0, 0.17), centre + Vector3(-0.14, 0, -0.12), centre + Vector3(0.14, 0, -0.12), Vector3.UP, _red)
+	_triangle(centre + Vector3(0, 0, 0.17), centre + Vector3(-0.14, 0, -0.12), centre + Vector3(0.14, 0, -0.12), Vector3.UP, accent)
 
 
 func show_goal_intake(secured: int, activity: bool = false) -> void:
@@ -528,7 +550,8 @@ func _build_reservoir(level: LevelDefinition) -> void:
 	_closed_light = _material(Color("dba45d"), 0.35)
 	_open_light = _material(Color("48b8b0"), 0.35)
 	_status = _box(Vector3(0.09, 0.045, 0.03), Vector3(r.end.x - 0.12, port_top + 0.047, front + 0.075), _closed_light, reservoir)
-	set_reservoir_open_amount(0)
+	source_lids[level.reservoir_id] = {"gate":_gate,"closed":_lid_closed,"status":_status,"closed_light":_closed_light,"open_light":_open_light,"amount":0.0}
+	set_source_open_amount(level.reservoir_id,0)
 
 
 func source_anchor(id: StringName) -> Vector3:
@@ -606,13 +629,31 @@ func clear_effects() -> void:
 
 
 func set_reservoir_open_amount(amount: float) -> void:
-	gate_open_amount = clampf(amount, 0.0, 1.0)
-	var kick := smoothstep(0.0, 0.30, gate_open_amount)
-	var flight := smoothstep(0.12, 1.0, gate_open_amount)
-	_gate.position = _lid_closed + Vector3(-4.8 * flight, 2.2 * flight - 0.4 * flight * flight, 0.28 * kick + 0.5 * flight)
-	_gate.rotation = Vector3(-2.8 * flight, 1.8 * flight, -2.1 * flight)
-	_gate.visible = gate_open_amount < 0.999
-	_status.material_override = _open_light if gate_open_amount >= 0.30 else _closed_light
+	set_source_open_amount(primary_source, amount)
+
+
+func set_source_open_amount(id: StringName, amount: float) -> void:
+	if not source_lids.has(id): return
+	var lid: Dictionary = source_lids[id]
+	lid.amount = clampf(amount,0.0,1.0)
+	if id == primary_source: gate_open_amount = lid.amount
+	var kick := smoothstep(0.0,0.30,lid.amount)
+	var flight := smoothstep(0.12,1.0,lid.amount)
+	(lid.gate as Node3D).position = lid.closed + Vector3(-4.8*flight,2.2*flight-0.4*flight*flight,0.28*kick+0.5*flight)
+	(lid.gate as Node3D).rotation = Vector3(-2.8*flight,1.8*flight,-2.1*flight)
+	(lid.gate as Node3D).visible = lid.amount < 0.999
+	(lid.status as MeshInstance3D).material_override = lid.open_light if lid.amount >= 0.30 else lid.closed_light
+
+
+func reset_sources() -> void:
+	for id: StringName in source_lids: set_source_open_amount(id,0.0)
+
+
+func set_source_ready(id: StringName, ready: bool) -> void:
+	if not source_lids.has(id): return
+	var lid: Dictionary = source_lids[id]
+	if lid.amount < 0.30:
+		(lid.status as MeshInstance3D).material_override = lid.open_light if ready else lid.closed_light
 
 
 func set_goal_complete(complete: bool) -> void:
