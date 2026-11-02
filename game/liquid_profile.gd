@@ -15,5 +15,5 @@ extends Resource
 @export var max_speed: float = 3.2
 @export var velocity_noise_limit: float = 0.40
 @export var subgrid_capillarity: bool = true
-@export var cohesion_strength: float = 2.0
+@export var cohesion_strength: float = 3.0
 @export var cohesion_range: float = 2.8

@@ -62,7 +62,7 @@ class NativeLiquidSolver : public RefCounted {
     float surface_tension = .072f;
     float velocity_noise_limit = .40f;
     bool subgrid_capillarity = true;
-    float cohesion_strength=2.f,cohesion_range=2.8f;
+    float cohesion_strength=3.f,cohesion_range=2.8f;
     float lowest_floor = 0;
     float required = .8f, hold_seconds = .75f, fraction = 0, held = 0, flow_speed = 1.15f;
     float maximum_divergence = 0, liquid_volume = 0;
@@ -457,10 +457,11 @@ class NativeLiquidSolver : public RefCounted {
         }
     }
     void add_subgrid_capillarity(float dt) {
+        capillary_impulse.assign(count,Vector3());
+        support_count.assign(count,0);
         if (!subgrid_capillarity || surface_tension<=0 || count<2) return;
         for (int i:particle_cells) particle_heads[i]=-1;
         particle_cells.clear(); capillary_pairs.clear();
-        support_count.assign(count,0); capillary_impulse.assign(count,Vector3());
         float h=cohesion_range*spacing,h2=h*h;
         for (int i=0;i<count;++i) if (active[i] && phases[i]==LIQUID) {
             Vector3 q=(positions[i]-origin)/cell_size;
@@ -488,8 +489,7 @@ class NativeLiquidSolver : public RefCounted {
         // It has finite range, conserves pair momentum and leaves free spray
         // ballistic once it separates from the surface.
         float acceleration=2*cohesion_strength*surface_tension/(mass_density*radius*radius);
-        float capillary_speed=std::sqrt(surface_tension/(mass_density*radius));
-        float damping=std::min(dt*capillary_speed/radius,.22f);
+
         for (const auto &pair:capillary_pairs) {
             int a=pair.a,b=pair.b;
             float sparse=clampf((32.f-float(std::min(support_count[a],support_count[b])))/24.f,0,1);
@@ -502,15 +502,14 @@ class NativeLiquidSolver : public RefCounted {
             Vector3 n=pair.delta/pair.distance;
             float q=pair.distance/h,w=16*q*q*(1-q)*(1-q);
             float stretch=clampf((pair.distance-spacing)/spacing,-.25f,1.f);
-            float separating=std::max((velocities[b]-velocities[a]).dot(n),0.f);
-            float impulse=acceleration*dt*stretch+std::min(separating,capillary_speed*2)*damping;
+            float impulse=acceleration*dt*stretch;
             impulse*=sparse*w/std::max(1.f,.5f*float(support_count[a]+support_count[b]));
             capillary_impulse[a]+=n*impulse; capillary_impulse[b]-=n*impulse;
         }
         float largest=0;
         for (int i=0;i<count;++i) largest=std::max(largest,capillary_impulse[i].length());
         float scale=largest>acceleration*dt ? acceleration*dt/largest : 1.f;
-        for (int i=0;i<count;++i) if (active[i] && phases[i]==LIQUID) velocities[i]+=capillary_impulse[i]*scale;
+        for (auto &impulse:capillary_impulse) impulse*=scale;
     }
     void substep(float dt, Vector3 gravity) {
         clear_grid();
@@ -596,18 +595,13 @@ class NativeLiquidSolver : public RefCounted {
                     candidate=previous+(tangent+velocity)*(.5f*dt);
                 }
             }
+            // Subcell surface forces must survive the MAC projection: putting
+            // them only on the grid cancels attraction in thin free films.
+            // Apply each symmetric impulse once, including to advection.
+            velocity=limited(velocity+capillary_impulse[i],max_speed);
+            candidate+=capillary_impulse[i]*(dt*.5f);
             Vector3 point = constrain(candidate, previous);
-            Vector2 goal_xz(point.x,point.z);
-            if (safe_goal && goal_phase==LIQUID && !captured[i] && goal.has_point(goal_xz) && point.y>=floor_height(goal_xz) && point.y<top-radius) {
-                captured[i]=1; ++secured;
-            }
-            if (safe_goal && captured[i]) {
-                // The retained volume stays active, visible and pressure
-                // coupled inside the covered receiver; it is never despawned.
-                point.x=clampf(point.x,goal.position.x+radius,goal.get_end().x-radius);
-                point.z=clampf(point.z,goal.position.y+radius,goal.get_end().y-radius);
-                point.y=clampf(point.y,floor_height(Vector2(point.x,point.z))+radius,top-radius);
-            }
+            admit_liquid(i,point);
             Vector3 contact=candidate-point;
             bool on_ramp=false;
             for (const auto &r:ramps) if (r.bounds.has_point(Vector2(point.x,point.z)) && point.y-r.sample(Vector2(point.x,point.z))<radius*2.5f) {
@@ -635,9 +629,59 @@ class NativeLiquidSolver : public RefCounted {
             record_loss(i,previous,candidate);
 
         }
+        preserve_thin_films(dt);
         advance_vapor(dt,gravity);
         finish_ice_step();
 
+    }
+
+    void admit_liquid(int i,Vector3 &point) {
+        Vector2 goal_xz(point.x,point.z);
+        if (safe_goal && goal_phase==LIQUID && !captured[i] && goal.has_point(goal_xz) && point.y>=floor_height(goal_xz) && point.y<top) {
+            captured[i]=1; ++secured;
+        }
+        if (safe_goal && captured[i]) {
+            // The retained volume stays active, visible and pressure
+            // coupled inside the covered receiver; it is never despawned.
+            point.x=clampf(point.x,goal.position.x+radius,goal.get_end().x-radius);
+            point.z=clampf(point.z,goal.position.y+radius,goal.get_end().y-radius);
+            point.y=clampf(point.y,floor_height(Vector2(point.x,point.z))+radius,top-radius);
+        }
+    }
+
+    void preserve_thin_films(float dt) {
+        if (!subgrid_capillarity || surface_tension<=0 || capillary_pairs.empty()) return;
+        std::fill(capillary_impulse.begin(),capillary_impulse.end(),Vector3());
+        float relaxation=1-std::exp(-20.f*cohesion_strength*dt);
+        for (const auto &pair:capillary_pairs) {
+            int a=pair.a,b=pair.b;
+            if (!active[a] || !active[b] || captured[a] || captured[b]) continue;
+            float sparse=clampf((32.f-float(std::min(support_count[a],support_count[b])))/24.f,0,1);
+            if (sparse<=0) continue;
+            Vector3 delta=positions[b]-positions[a]; float distance=delta.length();
+            if (distance<1e-7f || distance>cohesion_range*spacing) continue;
+            Vector3 mid=(positions[a]+positions[b])*.5f;
+            if (mid.y<floor_height(Vector2(mid.x,mid.z))+radius*.25f) continue;
+            bool blocked=false;
+            for (const auto &box:obstacles) if (box.has_point(mid)) { blocked=true; break; }
+            if (blocked || impact_contains(mid) || ice_contains(mid)) continue;
+            Vector3 n=delta/distance;
+            float separating=std::max((velocities[b]-velocities[a]).dot(n),0.f);
+            // Dissipate only separation of neighbouring surface parcels.
+            // The pair reaction preserves momentum; coherent translation,
+            // and incoming impact speed are unchanged. Rebuild this
+            // finite-range interaction every substep, with no lasting bonds.
+            float impulse=.5f*relaxation*sparse*separating/std::max(1.f,.5f*float(support_count[a]+support_count[b]));
+            capillary_impulse[a]+=n*impulse; capillary_impulse[b]-=n*impulse;
+        }
+        for (int i=0;i<count;++i) if (active[i] && phases[i]==LIQUID && !captured[i]) {
+            Vector3 change=capillary_impulse[i]*(dt*.5f);
+            if (change.length_squared()<1e-16f) continue;
+            Vector3 point=constrain(positions[i]+change,positions[i]);
+            admit_liquid(i,point);
+            velocities[i]=limited(velocities[i]+(point-positions[i])*(2/dt),max_speed);
+            positions[i]=point;
+        }
     }
 
     // Sparse weighted-centroid surface reconstruction. Reflected samples
@@ -688,8 +732,10 @@ class NativeLiquidSolver : public RefCounted {
         if (!std::isfinite(height) || point.y >= height + .001f) return point;
         if (height - point.y < SURFACE_Y) { point.y = height + .001f; return point; }
         if (point.y >= top) return point;
-        Vector2 nearest(point.x, point.z); float best = 1e20f;
-        for (size_t i = 0; i < floors.size(); ++i) if (elevations[i] < point.y + .001f) {
+        Vector2 nearest(point.x, point.z); float best = KERNEL*KERNEL;
+        // Marching tetrahedra can put a contact a fraction of a sample below
+        // the floor. Include that floor instead of snapping to a distant wall.
+        for (size_t i = 0; i < floors.size(); ++i) if (elevations[i] < point.y + SURFACE_Y + .001f) {
             Rect2 r = floors[i].grow(-.001f); auto end = r.get_end();
             Vector2 candidate(clampf(point.x, r.position.x, end.x), clampf(point.z, r.position.y, end.y));
             float distance = candidate.distance_squared_to(Vector2(point.x, point.z));
@@ -715,9 +761,11 @@ class NativeLiquidSolver : public RefCounted {
                 }
             };
             consider(nearby_walls(point));
-            if (best==1e20f) consider(wall_indices);
         }
-        point.x = nearest.x; point.z = nearest.y; return point;
+        point.x = nearest.x; point.z = nearest.y;
+        float floor=floor_height(nearest);
+        if (std::isfinite(floor) && floor-point.y<SURFACE_Y) point.y=std::max(point.y,floor+.001f);
+        return point;
     }
     Dictionary make_surface(int selected_phase=LIQUID) {
         surface_selected_phase=selected_phase;
@@ -793,7 +841,21 @@ class NativeLiquidSolver : public RefCounted {
         for (int i : surface_touched) {
             Vector3 point=surface_origin+Vector3((i%SLICE)%SX*SURFACE_CELL,(i/SLICE)*SURFACE_Y,((i%SLICE)/SX)*SURFACE_CELL);
             Vector3 mean=surface_gradient[i]/std::max(surface_field[i],1e-12f);
-            float distance=point.distance_to(mean);
+            Vector3 offset=point-mean;
+            float distance=offset.length();
+            float floor=surface_floor[i%SLICE];
+            if (selected_phase==LIQUID && std::isfinite(floor) && point.y-floor<.11f && mean.y-floor<.08f) {
+                // A wet subcell film is wide and shallow, rather than a row
+                // of spheres. Match the physical neighbour radius while
+                // preserving the reconstruction ellipsoid's volume.
+                Vector3 normal(0,1,0);
+                for (const auto &r:ramps) if (r.bounds.has_point(Vector2(point.x,point.z))) normal=Vector3(-r.gradient.x,1,-r.gradient.y).normalized();
+                float stretch=1+.5f*clampf((.08f-(mean.y-floor))/.04f,0,1);
+                float perpendicular=offset.dot(normal);
+                Vector3 tangent=offset-normal*perpendicular;
+                float square=stretch*stretch;
+                distance=std::sqrt(tangent.length_squared()/square+perpendicular*perpendicular*square*square);
+            }
             surface_field[i]=clampf(.5f+(spacing*.90f-distance)/KERNEL,0,1);
         }
         for (int i : surface_touched) {
@@ -923,7 +985,7 @@ public:
         surface_tension = cfg.has("surface_tension") ? float(cfg["surface_tension"]) : .072f;
         velocity_noise_limit=cfg.has("velocity_noise_limit") ? clampf(float(cfg["velocity_noise_limit"]),0,.4f) : .40f;
         subgrid_capillarity=!cfg.has("subgrid_capillarity") || bool(cfg["subgrid_capillarity"]);
-        cohesion_strength=cfg.has("cohesion_strength") ? clampf(float(cfg["cohesion_strength"]),0,4) : 2.f;
+        cohesion_strength=cfg.has("cohesion_strength") ? clampf(float(cfg["cohesion_strength"]),0,4) : 3.f;
         cohesion_range=cfg.has("cohesion_range") ? clampf(float(cfg["cohesion_range"]),2,3.2f) : 2.8f;
         required = float(cfg["required"]); hold_seconds = float(cfg["hold"]);
         flow_speed = cfg.has("flow_speed") ? clampf(float(cfg["flow_speed"]), .5f, 1.5f) : 1.15f;

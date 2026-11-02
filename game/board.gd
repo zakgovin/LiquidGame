@@ -6,13 +6,13 @@ extends Node3D
 var _steel := _material(Color("657078"), 0.55)
 var _base := _material(Color("abb3b0"), 0.9)
 var _rim := _material(Color("78868a"), 0.55)
-var foundation := _material(Color("b7b0a1"), 0.9)
-var floor_materials: Array[StandardMaterial3D] = []
+var foundation := _marble(Color("c2c9c6"))
+var floor_materials: Array[ShaderMaterial] = []
 var contact_material := ShaderMaterial.new()
 var contact_bands: int = 0
 var open_edges: int = 0
 var bank_jambs: int = 0
-var _slab_edge := _material(Color("918676"), 0.85)
+var _slab_edge := _material(Color("919d99"), 0.85)
 var _well := _material(Color("253139"), 0.95)
 var _lowest_floor: float = 0.0
 var _step := ShaderMaterial.new()
@@ -55,6 +55,14 @@ static func _material(color: Color, roughness: float) -> StandardMaterial3D:
 	return result
 
 
+static func _marble(color: Color) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = preload("res://assets/materials/marble.gdshader")
+	material.set_shader_parameter("stone_noise", preload("res://assets/materials/marble_noise.tres"))
+	material.set_shader_parameter("stone_color", color)
+	return material
+
+
 func _glass_material(alpha: float) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = preload("res://assets/materials/glass.gdshader")
@@ -87,11 +95,12 @@ func build(level: LevelDefinition) -> void:
 		for tile: Dictionary in level.terrain_tiles():
 			if tile.channel: _floor_support.append({"polygon": LevelDefinition.rectangle_polygon(tile.bounds), "height": tile.height})
 	var floors := {}
+	var marble := _marble(Color("e9e8df"))
+	marble.set_shader_parameter("low_height", heights[0])
+	marble.set_shader_parameter("high_height", heights[-1])
+	floor_materials.append(marble)
 	for height: float in heights:
-		var depth := (heights[-1] - height) / maxf(0.01, heights[-1] - heights[0])
-		var material := _material(Color("e8dfca").lerp(Color("b9b09f"), depth * 0.5), 0.92)
-		floors[roundi(height * 10000)] = material
-		floor_materials.append(material)
+		floors[roundi(height * 10000)] = marble
 	if level.uses_polygons():
 		for face: Dictionary in level.floor_faces():
 			var centre := Vector2.ZERO
@@ -112,8 +121,7 @@ func build(level: LevelDefinition) -> void:
 		var y: float = tile.height
 		if tile.channel:
 			var material: Material = floors[roundi(y * 10000)]
-			var plate := _box(Vector3(r.size.x, 0.06, r.size.y), Vector3(r.get_center().x, y - 0.03, r.get_center().y), material)
-			plate.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			_slab(LevelDefinition.rectangle_polygon(r), y, 0.06, material)
 		else:
 			_quad(Vector3(r.position.x, y, r.position.y), Vector3(r.end.x, y, r.position.y), Vector3(r.end.x, y, r.end.y), Vector3(r.position.x, y, r.end.y), Vector3.UP, _glass)
 			_quad(Vector3(r.position.x, level.base_height, r.position.y), Vector3(r.end.x, level.base_height, r.position.y), Vector3(r.end.x, level.base_height, r.end.y), Vector3(r.position.x, level.base_height, r.end.y), Vector3.DOWN, _glass)
@@ -160,7 +168,7 @@ func build(level: LevelDefinition) -> void:
 	_finish_caps()
 	_build_ramp_guides(level)
 	if not level.uses_polygons():
-		_box(Vector3(level.board_bounds.size.x + 0.08, 0.08, level.board_bounds.size.y + 0.08), Vector3(level.board_bounds.get_center().x, level.base_height - 0.045, level.board_bounds.get_center().y), foundation)
+		_slab(LevelDefinition.rectangle_polygon(level.board_bounds.grow(0.04)), level.base_height - 0.005, 0.08, foundation)
 	var goal := level.goal
 	var top := level.board_top + 0.026
 	var rim := _box(Vector3(goal.size.x + 0.15, 0.04, 0.10), Vector3(goal.get_center().x, top, goal.end.y), _red)
@@ -455,6 +463,7 @@ func _triangle(a: Vector3, b: Vector3, c: Vector3, normal: Vector3, material: Ma
 	if (b - a).cross(c - a).dot(normal) > 0.0: points.reverse()
 	for point: Vector3 in points:
 		surface.set_normal(normal)
+		surface.set_uv(Vector2(point.x, point.z))
 		surface.add_vertex(point)
 
 
@@ -469,6 +478,7 @@ func _quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, normal: Vector3, mate
 	if (b - a).cross(c - a).dot(normal) > 0.0: points = [a, c, b, a, d, c]
 	for point: Vector3 in points:
 		surface.set_normal(normal)
+		surface.set_uv(Vector2(point.x, point.z))
 		surface.add_vertex(point)
 
 

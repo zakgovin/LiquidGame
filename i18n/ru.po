@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.13.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.14.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "ГИДРОЛОГИКА"
@@ -173,13 +173,13 @@ msgid "LEVEL_CASCADE"
 msgstr "Каскад"
 
 msgid "CASCADE_ROUTE"
-msgstr "Спустите воду, поднимите по пандусу и снова спустите.\nМеняйте направление; финальный сосуд открыт."
+msgstr "Пройдите глубокий каскад и крутой подъём сильным наклоном.\nМеняйте направление; финальный сосуд открыт."
 
 msgid "LEVEL_IMPULSE"
 msgstr "Импульс"
 
 msgid "IMPULSE_ROUTE"
-msgstr "Соберите воду и ударом струи откройте створку.\nСлабый поток её не откроет; приёмник открыт."
+msgstr "Соберите воду и сильным ударом откройте тугую пружинную створку.\nФинальный приёмник открыт."
 
 msgid "LEVEL_HOT_ZONE"
 msgstr "Горячая зона"
@@ -191,10 +191,10 @@ msgid "LEVEL_FREEZE"
 msgstr "Заморозка"
 
 msgid "FREEZE_ROUTE"
-msgstr "Заморозьте воду в синей камере и проведите лёд по решётке.\nПриёмник засчитывает только лёд."
+msgstr "Заморозьте воду в синей камере и проведите лёд по решётке.\nОткрытый приёмник засчитывает лёд."
 
 msgid "LEVEL_THAW"
 msgstr "Оттепель"
 
 msgid "THAW_ROUTE"
-msgstr "Доставьте лёд через решётку к нагревателю.\nРастопите его перед узким проходом в приёмник."
+msgstr "Доставьте лёд через решётку и быстро проведите талую воду через нагреватель.\nОн испаряет воду так же, как в «Горячей зоне»; приёмник открыт."

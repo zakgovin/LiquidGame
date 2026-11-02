@@ -30,6 +30,6 @@ spawn = Rect2(-2.3000002, -4.4, 1.1999999, 1.5999999)
 reservoir_bounds = Rect2(-2.4, -4.5, 1.4, 1.8)
 goal = Rect2(0.8, 2.4, 1.6, 1.8)
 particle_count = 3072
-safe_goal = true
+safe_goal = false
 reservoir_id = &"source_08"
 route = PackedVector2Array(-1.7, -3.6, -1.9, 0, 1.6, 0, 1.6, 3.2)

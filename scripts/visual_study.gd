@@ -53,22 +53,29 @@ func _run() -> void:
 	game.surface.rebuild(game.simulation.positions, game.level, game.simulation.active, game.simulation.native_solver())
 	game.pivot.rotation = Vector3(0.045, 0, -0.015)
 	var results := {}
-	results["warm_contact"] = await capture_variant("warm")
-	for material: StandardMaterial3D in game.board.floor_materials: material.albedo_color = Color("d5dde0")
-	game.board.foundation.albedo_color = Color("8c9da7")
-	game.board.contact_material.set_shader_parameter("strength", 0.0)
-	var environment: Environment
-	for child: Node in game.get_children():
-		if child is WorldEnvironment: environment = child.environment
-	environment.ssao_enabled = true
-	environment.ssao_radius = 0.20
-	environment.ssao_intensity = 0.50
-	results["cool_ssao"] = await capture_variant("cool-ssao")
-	environment.ssao_enabled = false
-	for material: StandardMaterial3D in game.board.floor_materials: material.albedo_color = Color("38444c")
-	game.board.foundation.albedo_color = Color("1f2d35")
-	game.board.contact_material.set_shader_parameter("strength", 1.0)
-	results["dark_contact"] = await capture_variant("dark")
+	if "marble" in OS.get_cmdline_user_args():
+		for contrast: float in [0.0, 0.09, 0.18]:
+			game.board.foundation.set_shader_parameter("vein_strength", contrast)
+			for material: ShaderMaterial in game.board.floor_materials: material.set_shader_parameter("vein_strength", contrast)
+			var label := "marble-%02d" % roundi(contrast * 100)
+			results[label] = await capture_variant(label)
+	else:
+		results["warm_contact"] = await capture_variant("warm")
+		for material: ShaderMaterial in game.board.floor_materials: material.set_shader_parameter("stone_color", Color("d5dde0"))
+		game.board.foundation.set_shader_parameter("stone_color", Color("8c9da7"))
+		game.board.contact_material.set_shader_parameter("strength", 0.0)
+		var environment: Environment
+		for child: Node in game.get_children():
+			if child is WorldEnvironment: environment = child.environment
+		environment.ssao_enabled = true
+		environment.ssao_radius = 0.20
+		environment.ssao_intensity = 0.50
+		results["cool_ssao"] = await capture_variant("cool-ssao")
+		environment.ssao_enabled = false
+		for material: ShaderMaterial in game.board.floor_materials: material.set_shader_parameter("stone_color", Color("38444c"))
+		game.board.foundation.set_shader_parameter("stone_color", Color("1f2d35"))
+		game.board.contact_material.set_shader_parameter("strength", 1.0)
+		results["dark_contact"] = await capture_variant("dark")
 	var output := FileAccess.open("res://build/visual-study.json", FileAccess.WRITE)
 	output.store_string(JSON.stringify(results, "\t"))
 	output.close()

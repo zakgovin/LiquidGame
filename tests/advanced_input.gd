@@ -61,15 +61,15 @@ func _advanced() -> void:
 	var all_buttons := true
 	for number: int in range(9): all_buttons = all_buttons and game.hud.buttons.has("level_%d" % number)
 	check(all_buttons and game.LEVELS.size() == 9, "All nine playable levels are exposed in the selection menu")
-	await snapshot("v0130-nine-levels")
+	await snapshot("v0140-nine-levels")
 	game._menu()
 	for number: int in selected:
 		game._select_level(number - 1)
 		game._start()
-		check(game.level.safe_goal == (number >= 7), "Open or protected receiver matches the requested rule on level " + str(number))
-		check(game.board._goal_flaps.size() == (2 if number >= 7 else 0), "Receiver hardware matches its physical protection")
+		check(game.level.safe_goal == (number == 7), "Open or protected receiver matches the requested rule on level " + str(number))
+		check(game.board._goal_flaps.size() == (2 if number == 7 else 0), "Receiver hardware matches its physical protection")
 		if number == 9: check(game.simulation.ice_count == game.level.particle_count, "Thaw begins with actual frozen water")
-		await snapshot("v0130-level-%d-ready" % number)
+		await snapshot("v0140-level-%d-ready" % number)
 		var directions := COURSES.directions(number)
 		var durations := COURSES.frames(number)
 		await open_source(game, directions[0])
@@ -90,19 +90,19 @@ func _advanced() -> void:
 				if number == 5 and frame % 30 == 0:
 					for i: int in range(game.simulation.positions.size()):
 						var p: Vector3 = game.simulation.positions[i]
-						if p.y < -0.20: saw_low[i] = 1
-						if saw_low[i] and p.y > 0.60 and p.x > 1.1: climbed[i] = 1
-				if number == 5 and stage == 2 and frame == 180: await snapshot("v0130-cascade-ascent")
-				if number == 6 and game.simulation.impact_latched and stage == directions.size() - 2 and frame == 250: await snapshot("v0130-impulse-open")
+						if p.y < -0.90: saw_low[i] = 1
+						if saw_low[i] and p.y > 1.25 and p.x > 1.1: climbed[i] = 1
+				if number == 5 and stage == 2 and frame == 180: await snapshot("v0140-cascade-ascent")
+				if number == 6 and game.simulation.impact_latched and stage == directions.size() - 2 and frame == 250: await snapshot("v0140-impulse-open")
 				if number == 7 and not saw_vapor and game.simulation.vapor_count > 24:
 					for i: int in range(game.simulation.positions.size()):
 						if game.simulation.active[i] and game.simulation.phases[i] == 2 and game.simulation.positions[i].y > 0.8:
 							saw_vapor = true
-							await snapshot("v0130-vapor-plume")
+							await snapshot("v0140-vapor-plume")
 							break
 				if number == 9 and not saw_melt and game.simulation.water_count > 128 and game.simulation.ice_count > 128:
 					saw_melt = true
-					await snapshot("v0130-thaw-transition")
+					await snapshot("v0140-thaw-transition")
 			var f: LiquidSimulation = game.simulation
 			var finite := true
 			for p: Vector3 in f.positions: finite = finite and p.is_finite()
@@ -110,7 +110,13 @@ func _advanced() -> void:
 			print("INPUT STAGE ", "rotation" if rotation_mode else "tilt", " ", number, " ", stage, " delivered=", f.goal_fraction, " secured=", f.secured_count, " water=", f.water_count, " ice=", f.ice_count, " vapor=", f.vapor_count, " lost=", f.lost_count, " gate=", f.impact_latched)
 			if number == 8 and stage == 1:
 				check(f.ice_count >= game.level.particle_count * 0.8, "The cold chamber freezes enough water before crossing the grate")
-				await snapshot("v0130-freeze-solid")
+				var mesh_data: Dictionary = f.native_solver().call("build_ice_surface")
+				var vertices: PackedVector3Array = mesh_data.vertices
+				var coherent := not vertices.is_empty()
+				for i: int in range(0, vertices.size(), 3):
+					coherent = coherent and vertices[i].x >= -2.405 and vertices[i + 1].x >= -2.405 and vertices[i + 2].x >= -2.405 and vertices[i].distance_to(vertices[i + 1]) < 0.20
+				check(coherent, "The resting ice surface has no phantom slab extending through its wall")
+				await snapshot("v0140-freeze-solid")
 				var positions := f.positions.duplicate()
 				var temperatures := f.temperatures.duplicate()
 				game._pause()
@@ -126,9 +132,10 @@ func _advanced() -> void:
 		if number == 6: check(f.impact_latched and f.impact_angle > 1.3, "The strong water impact opens the actual spring mechanism")
 		if number == 7: check(saw_vapor and f.escaped_vapor > 0, "The hot route shows rising vapor and accounts for escaped steam")
 		if number == 9: check(saw_melt and f.water_count > game.level.particle_count * 0.8, "Thaw visibly passes through solid and liquid phases before delivery")
-		if number >= 7: check(f.secured_count == f.delivered_count, "Delivered mass remains secured in the protected receiver")
+		if number == 7: check(f.secured_count == f.delivered_count, "Delivered mass remains secured in the protected receiver")
+		else: check(f.secured_count == 0, "The open receiver does not secretly capture delivered mass")
 		check(game.hud.buttons.has("next") == (number < 9), "Only available next levels are offered")
-		await snapshot("v0130-level-%d-victory" % number)
+		await snapshot("v0140-level-%d-victory" % number)
 		game._menu()
 	game._select_level(8)
 	game._restart()

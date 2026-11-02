@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.13.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.14.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -173,13 +173,13 @@ msgid "LEVEL_CASCADE"
 msgstr "Cascade"
 
 msgid "CASCADE_ROUTE"
-msgstr "Descend, climb the ramp, then descend again.\nChange direction; the final vessel is open."
+msgstr "Descend into the deep cascade, then tilt strongly up the steep ramp.\nChange direction; the final vessel is open."
 
 msgid "LEVEL_IMPULSE"
 msgstr "Impulse"
 
 msgid "IMPULSE_ROUTE"
-msgstr "Gather the water and strike the spring gate with a strong jet.\nA gentle stream cannot open it; the final vessel is open."
+msgstr "Gather the water and strike the stiff spring gate with a strong jet.\nThe final vessel is open."
 
 msgid "LEVEL_HOT_ZONE"
 msgstr "Hot Zone"
@@ -191,10 +191,10 @@ msgid "LEVEL_FREEZE"
 msgstr "Freeze"
 
 msgid "FREEZE_ROUTE"
-msgstr "Freeze the water in the blue chamber, then cross the grate.\nThe receiver counts solid ice."
+msgstr "Freeze the water in the blue chamber, then cross the grate.\nThe open receiver counts solid ice."
 
 msgid "LEVEL_THAW"
 msgstr "Thaw"
 
 msgid "THAW_ROUTE"
-msgstr "Carry the ice across the grate to the heater.\nMelt it before the narrow passage into the receiver."
+msgstr "Carry the ice across the grate, then quickly guide the melt through the heater.\nIt boils water as fast as Hot Zone; the receiver is open."

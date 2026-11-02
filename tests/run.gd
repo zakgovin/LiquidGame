@@ -251,7 +251,8 @@ func _run() -> void:
 	course_angle = PI / 2.0
 	course_frame = 0
 	var rough_directions: Array[Vector2] = [Vector2.DOWN, Vector2(1, 0.1), Vector2.DOWN, Vector2(-1, -0.18), Vector2(1, 0.55), Vector2.DOWN]
-	var rough_frames: Array[int] = [100, 140, 60, 190, 400, 400]
+	# Reach the open bank before deliberately keeping the outward input.
+	var rough_frames: Array[int] = [100, 140, 90, 190, 400, 400]
 	for stage: int in range(rough_directions.size()):
 		for frame: int in range(rough_frames[stage]):
 			course_angle = rotate_toward(course_angle, rough_directions[stage].angle(), 3.5 / 60.0)
@@ -607,7 +608,7 @@ func _run() -> void:
 	check(game.level_index == 4 and not game.level.safe_goal and game.screen == game.Screen.READY, "The fifth level follows Bottleneck with an open final vessel")
 	for index: int in range(5, 9):
 		game._next_level()
-		check(game.level_index == index and game.level.safe_goal == (index >= 6), "Next-level receiver protection is correct on level " + str(index + 1))
+		check(game.level_index == index and game.level.safe_goal == (index == 6), "Next-level receiver protection is correct on level " + str(index + 1))
 	game._next_level()
 	check(game.level_index == 8, "The ninth level cannot advance beyond the available list")
 	game._select_level(0)

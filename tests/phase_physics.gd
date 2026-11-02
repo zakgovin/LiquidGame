@@ -72,28 +72,67 @@ static func gate_case(speed: float, count: int) -> LiquidSimulation:
 
 static func run(check: Callable) -> void:
 	for index: int in range(5):
-		check.call(LEVELS[index].safe_goal == (index >= 2), "Receiver protection matches the requested rule on level %d" % (index + 5))
+		check.call(LEVELS[index].safe_goal == (index == 2), "Receiver protection matches the requested rule on level %d" % (index + 5))
 	thermal_check(check)
+	var rim_level := LEVELS[2].duplicate() as LevelDefinition
+	rim_level.particle_count = 1
+	var rim := LiquidSimulation.new(rim_level, WATER)
+	rim.set_gate_opening(1)
+	rim.set_particle(0, Vector3(rim_level.goal.get_center().x, rim_level.board_top - WATER.particle_radius * 0.25, rim_level.goal.get_center().y), Vector3.ZERO)
+	advance(rim, 1)
+	check.call(rim.secured_count == 1 and rim.delivered_count == 1 and rim.positions[0].y <= rim_level.board_top - WATER.particle_radius + 0.0001, "Water admitted just below a protected rim is captured and remains physically contained")
+	var hot: Dictionary = LEVELS[2].heat_regions[0]
+	var thaw: Dictionary = LEVELS[4].heat_regions[0]
+	check.call(hot.temperature == thaw.temperature and hot.conductance == thaw.conductance and thaw.temperature > 100 and LEVELS[4].obstacles.is_empty(), "Hot Zone and Thaw share boiling rules and Thaw has no lintel")
+	var enthalpies: Array[float] = []
+	for definition: LevelDefinition in [LEVELS[2], LEVELS[4]]:
+		var one := definition.duplicate() as LevelDefinition
+		one.particle_count = 1
+		one.initial_phase = 0
+		one.initial_temperature = 20
+		var heated := LiquidSimulation.new(one, WATER)
+		heated.set_gate_opening(1)
+		heated.set_particle(0, Vector3(-1.6, 0.17, 1), Vector3.ZERO)
+		advance(heated, 120)
+		enthalpies.append(heated.thermal_enthalpy)
+	check.call(absf(enthalpies[0] - enthalpies[1]) < 0.01, "The same water receives the same heat over the same time in both hot levels")
 	var weak := gate_case(0.3, 1024)
 	check.call(not weak.impact_latched and weak.impact_angle < 0.05, "A weak jet leaves the spring gate closed")
 	weak = null
+	var medium := gate_case(1.2, 1024)
+	check.call(not medium.impact_latched, "The stiffer spring also resists a moderate incoming stream")
+	medium = null
 	var drop := gate_case(3.2, 1)
 	check.call(not drop.impact_latched, "One fast droplet lacks the impulse to open the gate")
 	drop = null
-	var strong := gate_case(2.2, 1024)
+	var strong := gate_case(2.8, 1024)
 	check.call(strong.impact_latched and strong.impact_angle > 1.3, "A dense, fast jet physically opens and latches the gate")
 	strong.reset()
 	check.call(not strong.impact_latched and strong.impact_angle == 0, "Restart closes and rearms the spring mechanism")
 	strong = null
-	for level: LevelDefinition in [LEVELS[0], LEVELS[1]]:
+	for level: LevelDefinition in [LEVELS[0], LEVELS[1], LEVELS[3], LEVELS[4]]:
 		var one := level.duplicate() as LevelDefinition
 		one.particle_count = 1
+		one.initial_phase = one.goal_phase
+		one.initial_temperature = -10 if one.goal_phase == 1 else 20
 		var f := LiquidSimulation.new(one, WATER)
 		f.set_gate_opening(1)
 		var g := level.goal
 		f.set_particle(0, Vector3(g.get_center().x, level.floor_height(g.get_center()) + 0.6, g.position.y + 0.15), Vector3(0, 0, -2.2))
 		advance(f, 12, Vector2.UP)
-		check.call(f.secured_count == 0 and f.goal_fraction == 0 and f.active[0], "An open final vessel really allows water to flow back out: " + level.title)
+		check.call(f.secured_count == 0 and f.goal_fraction == 0 and f.active[0] and not g.has_point(Vector2(f.positions[0].x, f.positions[0].z)), "An open final vessel really allows its contents to flow back out: " + level.title)
+	var slope := LEVELS[0].duplicate() as LevelDefinition
+	slope.particle_count = 1
+	var ramp := LiquidSimulation.new(slope, WATER)
+	ramp.set_gate_opening(1)
+	var ramp_xz := Vector2(1.7, 3.1)
+	var start := Vector3(ramp_xz.x, slope.floor_height(ramp_xz) + WATER.particle_radius, ramp_xz.y)
+	ramp.set_particle(0, start, Vector3.ZERO)
+	advance(ramp, 30, Vector2.UP * 0.55)
+	check.call(ramp.positions[0].z >= start.z, "A mild tilt cannot climb the new steep Cascade ramp")
+	ramp.set_particle(0, start, Vector3.ZERO)
+	advance(ramp, 180, Vector2.UP)
+	check.call(ramp.positions[0].y > start.y + 1.2 and ramp.positions[0].z < start.z - 2.5 and ramp.lost_count == 0, "A strong tilt physically lifts water up the larger Cascade")
 	var frozen := LiquidSimulation.new(LEVELS[4], WATER)
 	frozen.set_gate_opening(0)
 	var distance := frozen.positions[0].distance_to(frozen.positions[-1])
@@ -124,6 +163,7 @@ static func run(check: Callable) -> void:
 	check.call(solid.ice_count == 512 and solid.ice_body_count == 1 and solid.lost_count == 0, "A rigid ice block spans the same grate openings without leaking through")
 	solid = null
 	var receiver := LEVELS[3].duplicate() as LevelDefinition
+	receiver.safe_goal = true # Exercise reusable protected-ice physics in a fixture.
 	receiver.heat_regions = []
 	receiver.initial_phase = 1
 	receiver.initial_temperature = -10
