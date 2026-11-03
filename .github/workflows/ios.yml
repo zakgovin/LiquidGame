@@ -1,0 +1,90 @@
+name: Build iOS prototype
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ios.yml
+      - scripts/build_ios.py
+      - scripts/setup.py
+      - native/**
+      - game/**
+      - resources/**
+      - assets/**
+      - project.godot
+      - export_presets.cfg
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hydrologic-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 50
+    env:
+      HYDRO_TOOLS: ${{ github.workspace }}/.tools
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Select newest installed stable Xcode
+        run: |
+          XCODE=$(python3 - <<'PY'
+          from pathlib import Path
+          import plistlib
+          apps = [p for p in Path('/Applications').glob('Xcode*.app') if 'beta' not in p.name.lower()]
+          def version(p):
+              info = plistlib.loads((p / 'Contents/Info.plist').read_bytes())
+              return tuple(int(v) for v in info['CFBundleShortVersionString'].split('.'))
+          print(max(apps, key=version))
+          PY
+          )
+          sudo xcode-select --switch "$XCODE/Contents/Developer"
+          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+      - name: Cache verified tools and Apple C++ builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.HYDRO_TOOLS }}/bin
+            ${{ env.HYDRO_TOOLS }}/data/godot/export_templates
+            ${{ env.HYDRO_TOOLS }}/godot-cpp-4.5
+            ${{ env.HYDRO_TOOLS }}/python
+          key: ios-godot463-cpp45-${{ runner.arch }}-${{ hashFiles('native/**', 'scripts/build_ios.py') }}
+          restore-keys: ios-godot463-cpp45-${{ runner.arch }}-
+      - name: Build device IPA, Xcode project and simulator smoke test
+        run: |
+          mkdir -p build/ios
+          set -o pipefail
+          python3 scripts/build_ios.py 2>&1 | tee build/ios/build.log
+      - name: Keep build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hydrologic-ios-build
+          path: |
+            build/ios/*.ipa
+            build/ios/*.zip
+            build/ios/*.json
+            build/ios/*.png
+            build/ios/*.log
+            build/ios/SHA256SUMS
+          if-no-files-found: warn
+      - name: Publish unsigned prototype downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(python3 -c 'import json; print(json.load(open("build/ios/build-info.json"))["version"])')
+          TAG="ios-v${VERSION}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --title "Hydrologic ${VERSION} for iOS (unsigned)" --notes-file docs/IOS.ru.md
+          fi
+          gh release upload "$TAG" build/ios/*.ipa build/ios/*.zip build/ios/SHA256SUMS build/ios/build-info.json build/ios/hydrologic-simulator.png --clobber
