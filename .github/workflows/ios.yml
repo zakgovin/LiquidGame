@@ -51,7 +51,8 @@ jobs:
           echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
           xcodebuild -version
       - name: Cache verified tools and Apple C++ builds
-        uses: actions/cache@v4
+        id: apple_cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.HYDRO_TOOLS }}/bin
@@ -71,10 +72,20 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           path = Path('build/ios/build.log')
-          text = '\n'.join(path.read_text(errors='replace').splitlines()[-70:]) if path.exists() else 'Build did not start; inspect the setup steps.'
-          text = text[-20000:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          text = '\n'.join(path.read_text(errors='replace').splitlines()[-24:]) if path.exists() else 'Build did not start; inspect the setup steps.'
+          text = text[-3500:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
           print('::error title=iOS build diagnostics::' + text)
           PY
+      - name: Save verified tools after compilation
+        if: always() && steps.apple_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.HYDRO_TOOLS }}/bin
+            ${{ env.HYDRO_TOOLS }}/data/godot/export_templates
+            ${{ env.HYDRO_TOOLS }}/godot-cpp-4.5
+            ${{ env.HYDRO_TOOLS }}/python
+          key: ${{ steps.apple_cache.outputs.cache-primary-key }}
       - name: Keep build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
