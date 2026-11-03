@@ -27,6 +27,9 @@ double environmental_heat=0;
 bool impact_enabled=false,impact_latched=false,impact_contact=false,impact_released=false;
 Vector3 impact_hinge;
 Basis impact_frame;
+mutable Basis impact_cached_frame,impact_cached_inverse;
+mutable Vector3 impact_low,impact_high;
+mutable float impact_cached_angle=std::numeric_limits<float>::quiet_NaN();
 float impact_width=1.2f,impact_height=.7f,impact_thickness=.06f;
 float impact_angle=0,impact_omega=0,impact_load=0;
 float impact_inertia=5,impact_spring=20,impact_damping=10,impact_detent=45;
@@ -57,6 +60,7 @@ void configure_phases(const Dictionary &cfg) {
     thermal=!heat_regions.empty() || initial_phase!=LIQUID;
     Dictionary gate=cfg.has("impact_gate") ? Dictionary(cfg["impact_gate"]) : Dictionary();
     impact_enabled=!gate.is_empty();
+    impact_cached_angle=std::numeric_limits<float>::quiet_NaN();
     if (impact_enabled) {
         impact_hinge=gate["hinge"]; Vector2 forward=gate.get("direction",Vector2(0,1));
         forward.normalize();
@@ -86,6 +90,8 @@ void update_phase(int i) {
 void advance_temperature(float dt) {
     if (!thermal) return;
     thermal_time+=dt;
+    bool uniform_temperature=true,temperature_seen=false;
+    float common_temperature=0;
     for (int i=0;i<count;++i) if (active[i]) {
         for (const auto &h:heat_regions) if (h.bounds.has_point(positions[i])) {
             float t=temperature_of(enthalpy[i]);
@@ -94,6 +100,20 @@ void advance_temperature(float dt) {
             next=h.temperature>=t ? std::min(next,target) : std::max(next,target);
             environmental_heat+=double(next-enthalpy[i])*parcel_mass(); enthalpy[i]=next;
         }
+        if (phases[i]!=VAPOR) {
+            float t=temperature_of(enthalpy[i]);
+            if (!temperature_seen) { common_temperature=t; temperature_seen=true; }
+            else if (t!=common_temperature) uniform_temperature=false;
+        }
+    }
+    // The final course has heaters, but its upstream water is initially
+    // isothermal. All pair exchanges are exactly zero in that case; avoid
+    // building and traversing a neighbour hash until a gradient exists.
+    // Phase changes still run, including the latent-heat plateaus.
+    if (uniform_temperature) {
+        for (int i=0;i<count;++i) if (active[i]) update_phase(i);
+        if (ice_dirty) rebuild_ice();
+        return;
     }
     // Symmetric conduction between touching parcels conserves total energy.
     float h=spacing*1.7f,h2=h*h;
@@ -174,10 +194,28 @@ Vector3 constrain_ramps(Vector3 point,float r) const {
     }
     return point;
 }
-Basis impact_rotation() const { return impact_frame*Basis(Vector3(1,0,0),-impact_angle); }
+void cache_impact_geometry() const {
+    if (impact_cached_angle==impact_angle) return;
+    impact_cached_frame=impact_frame*Basis(Vector3(1,0,0),-impact_angle);
+    impact_cached_inverse=impact_cached_frame.transposed();
+    impact_low=Vector3(1e6f,1e6f,1e6f); impact_high=-impact_low;
+    for (int k=0;k<8;++k) {
+        Vector3 p=impact_hinge+impact_cached_frame.xform(Vector3(k&1 ? impact_width*.5f:-impact_width*.5f,k&2 ? 0:-impact_height,k&4 ? impact_thickness*.5f:-impact_thickness*.5f));
+        impact_low=impact_low.min(p); impact_high=impact_high.max(p);
+    }
+    impact_cached_angle=impact_angle;
+}
+Basis impact_rotation() const { cache_impact_geometry(); return impact_cached_frame; }
+bool near_impact(Vector3 p,float radius=0) const {
+    cache_impact_geometry();
+    float margin=radius+.00001f;
+    return p.x>=impact_low.x-margin && p.x<=impact_high.x+margin &&
+        p.y>=impact_low.y-margin && p.y<=impact_high.y+margin &&
+        p.z>=impact_low.z-margin && p.z<=impact_high.z+margin;
+}
 Vector3 constrain_impact(Vector3 point,float r) const {
-    if (!impact_enabled) return point;
-    Basis frame=impact_rotation(); Vector3 local=frame.transposed().xform(point-impact_hinge);
+    if (!impact_enabled || !near_impact(point,r)) return point;
+    const Basis &frame=impact_cached_frame; Vector3 local=impact_cached_inverse.xform(point-impact_hinge);
     Vector3 corrected=collide_box(local,Vector3(-impact_width*.5f,-impact_height,-impact_thickness*.5f),Vector3(impact_width*.5f,0,impact_thickness*.5f),r);
     Vector3 delta=corrected-local;
     // Returning the transformed original point introduces round-off even
@@ -186,8 +224,8 @@ Vector3 constrain_impact(Vector3 point,float r) const {
     return delta.length_squared()>1e-14f ? point+frame.xform(delta) : point;
 }
 bool impact_contains(Vector3 p) const {
-    if (!impact_enabled) return false;
-    Vector3 q=impact_rotation().transposed().xform(p-impact_hinge);
+    if (!impact_enabled || !near_impact(p)) return false;
+    Vector3 q=impact_cached_inverse.xform(p-impact_hinge);
     return std::abs(q.x)<impact_width*.5f && q.y<0 && q.y>-impact_height && std::abs(q.z)<impact_thickness*.5f;
 }
 void update_impact(float dt) {

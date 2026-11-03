@@ -28,6 +28,11 @@ jobs:
         run: |
           ./scripts/godot.sh --headless --script res://tests/water_optics.gd
           ./scripts/godot.sh --headless --script res://tests/final_input.gd
+          ./scripts/godot.sh --headless --script res://tests/geometry_index.gd
+      - name: Render-frame scheduling avoids catch-up reconstruction
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: xvfb-run -a ./scripts/godot.sh --audio-driver Dummy --script res://tests/render_schedule.gd
       - name: Complete final course with the original water
         run: ./scripts/godot.sh --headless --script res://tests/final_course.gd
       - name: New levels through sensor input
@@ -39,4 +44,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: hydrologic-android-debug
-          path: build/hydrologic-0.15.0-android.apk
+          path: build/hydrologic-0.15.1-android.apk

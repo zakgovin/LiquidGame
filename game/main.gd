@@ -21,7 +21,9 @@ var screen: Screen = Screen.MENU
 var running: bool = false
 var tilt_feedback: bool = true
 var language_code: String = "ru"
-var _render_tick: int = 0
+const SURFACE_INTERVAL: float = 1.0 / 30.0
+var _surface_dirty: bool = false
+var _surface_elapsed: float = 0.0
 var _screenshot_frame: int = -1
 var _screenshot_path: String = ""
 var opening: bool = false
@@ -117,9 +119,7 @@ func _physics_process(delta: float) -> void:
 		board.show_goal_intake(simulation.secured_count + int(simulation.source_fill.get(level.collection_source,0)), simulation.intake_activity)
 		board.show_mechanisms(simulation.impact_angle, simulation.impact_load, simulation.impact_latched, simulation.freeze_progress)
 		board.show_spills(simulation.spill_points)
-		_render_tick += 1
-		if _render_tick % 2 == 0 and DisplayServer.get_name() != "headless":
-			surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
+		_surface_dirty = true
 		hud.field.active = not opening and (controls.use_rotation or not level.sources.is_empty())
 		if simulation.completed:
 			_begin_finish(world_tilt)
@@ -136,9 +136,7 @@ func _physics_process(delta: float) -> void:
 		board.show_goal_intake(simulation.secured_count + int(simulation.source_fill.get(level.collection_source,0)), simulation.intake_activity)
 		board.show_mechanisms(simulation.impact_angle, simulation.impact_load, simulation.impact_latched, simulation.freeze_progress)
 		board.show_spills(simulation.spill_points)
-		_render_tick += 1
-		if _render_tick % 2 == 0 and DisplayServer.get_name() != "headless":
-			surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
+		_surface_dirty = true
 		_finish_elapsed += delta
 		if simulation.delivered_count > _finish_delivered + 8:
 			_finish_delivered = simulation.delivered_count
@@ -168,6 +166,18 @@ func _physics_process(delta: float) -> void:
 		_screenshot_frame -= 1
 		if _screenshot_frame == 0:
 			_capture.call_deferred()
+
+
+func _process(delta: float) -> void:
+	# Catch-up physics can run several times before one displayed frame.
+	# Reconstruct only its latest state, at most once per render frame;
+	# intermediate meshes were expensive and were never shown on screen.
+	_surface_elapsed += delta
+	if not _surface_dirty or not pivot.visible or DisplayServer.get_name() == "headless": return
+	if _surface_elapsed < SURFACE_INTERVAL: return
+	_surface_elapsed = 0.0
+	_surface_dirty = false
+	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
 
 
 func _fit_camera() -> void:
@@ -275,7 +285,7 @@ func _begin_finish(tilt: Vector2 = Vector2.ZERO) -> void:
 	_finish_tilt = tilt
 	hud.show_game(false)
 	board.set_goal_complete(true)
-	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
+	_surface_dirty = true
 
 
 func _build_level() -> void:
@@ -291,6 +301,8 @@ func _build_level() -> void:
 		surface = FluidSurface.new(WATER)
 		pivot.add_child(surface)
 	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
+	_surface_dirty = false
+	_surface_elapsed = SURFACE_INTERVAL
 	_fit_viewport = Vector2.ZERO
 	_focus_rect = Rect2()
 	_focus_center = Vector3.ZERO
@@ -376,6 +388,8 @@ func _restart() -> void:
 	hud.show_ready(false, controls.use_rotation)
 	_update_camera(0.0)
 	surface.rebuild(simulation.positions, level, simulation.active, simulation.native_solver())
+	_surface_dirty = false
+	_surface_elapsed = SURFACE_INTERVAL
 	_position_source_hint()
 
 

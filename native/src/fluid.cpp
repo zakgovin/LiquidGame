@@ -54,6 +54,13 @@ class NativeLiquidSolver : public RefCounted {
     std::vector<Tile> tiles;
     std::vector<AABB> obstacles;
     std::vector<RampPatch> ramps;
+    // Exact terrain queries use a static broad phase. The final course has
+    // many distant rooms; they must not all be tested for every parcel and
+    // reconstructed vertex. Keep original shape order inside each bin.
+    static constexpr float TERRAIN_BIN=.28f;
+    int terrain_width=0,terrain_depth=0;
+    std::vector<std::vector<int>> terrain_bins,contact_floor_bins;
+    const std::vector<int> empty_terrain;
     std::vector<std::array<float, 6>> walls;
     std::vector<Vector3> wall_normals;
     std::vector<int> wall_indices, no_walls;
@@ -171,12 +178,46 @@ class NativeLiquidSolver : public RefCounted {
     float floor_height(Vector2 point) const {
         if (!bounds.has_point(point)) return -std::numeric_limits<float>::infinity();
         float height = top;
-        for (size_t i = 0; i < floors.size(); ++i)
-            if (floors[i].grow(.00001f).has_point(point)) height = std::min(height, elevations[i]);
-        for (const auto &p : polygons) if (inside_polygon(point,p)) height=std::min(height,p.height);
-        for (const auto &r:ramps) if (r.bounds.grow(.00001f).has_point(point)) height=std::min(height,r.sample(point));
+        if (terrain_bins.empty()) {
+            for (size_t i=0;i<floors.size();++i) if (floors[i].grow(.00001f).has_point(point)) height=std::min(height,elevations[i]);
+            for (const auto &p:polygons) if (inside_polygon(point,p)) height=std::min(height,p.height);
+            for (const auto &r:ramps) if (r.bounds.grow(.00001f).has_point(point)) height=std::min(height,r.sample(point));
+        } else for (int id:terrain_bins[terrain_bin(point)]) {
+            if (id<int(floors.size())) {
+                if (floors[id].grow(.00001f).has_point(point)) height=std::min(height,elevations[id]);
+            } else if (id<int(floors.size()+polygons.size())) {
+                const auto &p=polygons[id-floors.size()];
+                if (inside_polygon(point,p)) height=std::min(height,p.height);
+            } else {
+                const auto &r=ramps[id-floors.size()-polygons.size()];
+                if (r.bounds.grow(.00001f).has_point(point)) height=std::min(height,r.sample(point));
+            }
+        }
         if (height==top) for (auto r:voids) if (r.has_point(point)) return -std::numeric_limits<float>::infinity();
         return height;
+    }
+    int terrain_bin(Vector2 point) const {
+        int x=std::clamp(int(std::floor((point.x-bounds.position.x)/TERRAIN_BIN)),0,terrain_width-1);
+        int z=std::clamp(int(std::floor((point.y-bounds.position.y)/TERRAIN_BIN)),0,terrain_depth-1);
+        return z*terrain_width+x;
+    }
+    void build_terrain_index() {
+        terrain_width=std::max(1,int(std::ceil(bounds.size.x/TERRAIN_BIN)));
+        terrain_depth=std::max(1,int(std::ceil(bounds.size.y/TERRAIN_BIN)));
+        terrain_bins.assign(terrain_width*terrain_depth,{});
+        contact_floor_bins.assign(terrain_bins.size(),{});
+        auto add=[&](std::vector<std::vector<int>> &bins,Rect2 r,int id) {
+            Vector2 end=r.get_end();
+            int first=terrain_bin(r.position),last=terrain_bin(end);
+            for (int z=first/terrain_width;z<=last/terrain_width;++z)
+                for (int x=first%terrain_width;x<=last%terrain_width;++x) bins[z*terrain_width+x].push_back(id);
+        };
+        for (size_t i=0;i<floors.size();++i) {
+            add(terrain_bins,floors[i].grow(.00001f),int(i));
+            add(contact_floor_bins,floors[i].grow(.111f),int(i));
+        }
+        for (size_t i=0;i<polygons.size();++i) add(terrain_bins,polygons[i].bounds,int(floors.size()+i));
+        for (size_t i=0;i<ramps.size();++i) add(terrain_bins,ramps[i].bounds.grow(.00001f),int(floors.size()+polygons.size()+i));
     }
     bool is_void(Vector2 point) const {
         for (auto r:voids) if (r.has_point(point) && !std::isfinite(floor_height(point))) return true;
@@ -286,6 +327,9 @@ class NativeLiquidSolver : public RefCounted {
     }
     Vector3 sample_velocity(Vector3 point, bool old = false) const {
         point=mac_transfer_point(point);
+        return sample_grid_velocity(point,old);
+    }
+    Vector3 sample_grid_velocity(Vector3 point, bool old = false) const {
         return Vector3(sample_component(0, point, old), sample_component(1, point, old), sample_component(2, point, old));
     }
     float divergence(int i) const {
@@ -607,17 +651,18 @@ class NativeLiquidSolver : public RefCounted {
             for (int i : all) if (!field.valid[i]) { field.valid[i] = 1; field.touched.push_back(i); field.velocity[i] = 0; }
         }
         for (int i = 0; i < count; ++i) if (active[i] && phases[i]==LIQUID) {
-            Vector3 previous = positions[i], pic = sample_velocity(previous);
-            Vector3 flip = velocities[i] + pic - sample_velocity(previous,true);
+            Vector3 previous=positions[i],transfer=mac_transfer_point(previous);
+            Vector3 pic=sample_grid_velocity(transfer);
+            Vector3 flip = velocities[i] + pic - sample_grid_velocity(transfer,true);
             // Bound unresolved velocity noise; coherent grid motion is kept.
             Vector3 residual_velocity=limited(flip-pic,velocity_noise_limit);
             Vector3 velocity=limited((pic+residual_velocity*flip_ratio)*std::exp(-drag*dt),max_speed);
-            Vector3 midpoint = previous + sample_velocity(previous) * (.5f * dt);
+            Vector3 midpoint = previous + pic * (.5f * dt);
             Vector3 candidate = previous + limited(sample_velocity(midpoint), max_speed) * dt;
             // Below grid resolution, detached spray travels ballistically.
             // Projecting one marker as a full liquid cell invents pressure and
             // gives a droplet spurious impulses at wall and floor contacts.
-            Vector3 q = (mac_transfer_point(previous) - origin) / cell_size;
+            Vector3 q = (transfer - origin) / cell_size;
             int x = int(std::floor(q.x)), y = int(std::floor(q.y)), z = int(std::floor(q.z));
             int nearby = 0;
             if (in_grid(x,y,z)) {
@@ -877,7 +922,8 @@ class NativeLiquidSolver : public RefCounted {
         Vector2 nearest(point.x, point.z); float best = KERNEL*KERNEL;
         // Marching tetrahedra can put a contact a fraction of a sample below
         // the floor. Include that floor instead of snapping to a distant wall.
-        for (size_t i = 0; i < floors.size(); ++i) if (elevations[i] < point.y + SURFACE_Y + .001f) {
+        const auto &contacts=contact_floor_bins.empty() ? empty_terrain:contact_floor_bins[terrain_bin(Vector2(point.x,point.z))];
+        for (int i:contacts) if (elevations[i] < point.y + SURFACE_Y + .001f) {
             Rect2 r = floors[i].grow(-.001f); auto end = r.get_end();
             Vector2 candidate(clampf(point.x, r.position.x, end.x), clampf(point.z, r.position.y, end.y));
             float distance = candidate.distance_squared_to(Vector2(point.x, point.z));
@@ -915,6 +961,8 @@ class NativeLiquidSolver : public RefCounted {
         // and octahedral parcel highlights exaggerate the reconstruction grid.
         std::unordered_map<int64_t,int> lookup;
         std::vector<Vector3> points,normals;
+        lookup.reserve(surface_vertices.size()/3);
+        points.reserve(surface_vertices.size()/3); normals.reserve(surface_vertices.size()/3);
         std::vector<int> vertex_ids; vertex_ids.reserve(surface_vertices.size());
         for (size_t i=0;i<surface_vertices.size();++i) {
             const auto &p=surface_vertices[i];
@@ -931,10 +979,17 @@ class NativeLiquidSolver : public RefCounted {
             }
             vertex_ids.push_back(id);
         }
-        std::vector<std::vector<int>> neighbours(points.size());
+        // The topology is rebuilt at every visible update. Store adjacency
+        // contiguously instead of allocating a growable vector per vertex.
+        // Preserve all duplicates and insertion order, hence the same sums.
+        std::vector<int> offsets(points.size()+1,0);
+        for (int id:vertex_ids) offsets[id+1]+=2;
+        for (size_t i=1;i<offsets.size();++i) offsets[i]+=offsets[i-1];
+        auto cursor=offsets;
+        std::vector<int> neighbours(offsets.back());
         for (size_t i=0;i<vertex_ids.size();i+=3) for (int k=0;k<3;++k) {
             int a=vertex_ids[i+k];
-            neighbours[a].push_back(vertex_ids[i+(k+1)%3]); neighbours[a].push_back(vertex_ids[i+(k+2)%3]);
+            neighbours[cursor[a]++]=vertex_ids[i+(k+1)%3]; neighbours[cursor[a]++]=vertex_ids[i+(k+2)%3];
         }
         std::vector<uint8_t> contact(points.size(),0);
         for (size_t i=0;i<points.size();++i) {
@@ -948,10 +1003,10 @@ class NativeLiquidSolver : public RefCounted {
         for (int pass=0;pass<4;++pass) {
             float strength=(pass%2==0) ? .45f:-.47f;
             for (size_t i=0;i<points.size();++i) {
-                if (contact[i] || neighbours[i].empty()) { next[i]=points[i]; continue; }
+                if (contact[i] || offsets[i]==offsets[i+1]) { next[i]=points[i]; continue; }
                 Vector3 mean;
-                for (int j:neighbours[i]) mean+=points[j];
-                next[i]=points[i]+(mean/float(neighbours[i].size())-points[i])*strength;
+                for (int j=offsets[i];j<offsets[i+1];++j) mean+=points[neighbours[j]];
+                next[i]=points[i]+(mean/float(offsets[i+1]-offsets[i])-points[i])*strength;
             }
             points.swap(next);
         }
@@ -973,7 +1028,8 @@ class NativeLiquidSolver : public RefCounted {
         for (int pass=0;pass<4;++pass) {
             for (size_t i=0;i<points.size();++i) {
                 Vector3 sum=filtered[i]*2; float weight=2;
-                for (int j:neighbours[i]) {
+                for (int k=offsets[i];k<offsets[i+1];++k) {
+                    int j=neighbours[k];
                     float w=std::max(0.f,filtered[i].dot(filtered[j])); w*=w;
                     sum+=filtered[j]*w; weight+=w;
                 }
@@ -1210,6 +1266,7 @@ protected:
     }
 public:
     void configure(const Dictionary &cfg) {
+        terrain_bins.clear(); contact_floor_bins.clear();
         floors.clear(); elevations.clear(); tiles.clear(); walls.clear(); polygons.clear(); voids.clear(); openings.clear(); obstacles.clear(); ramps.clear();
         Array fs = cfg["regions"], ts = cfg["tiles"], ws = cfg["walls"];
         PackedFloat32Array heights = cfg["elevations"];
@@ -1247,6 +1304,7 @@ public:
         }
         if (cfg.has("obstacles")) { Array boxes=cfg["obstacles"]; for (int i=0;i<boxes.size();++i) obstacles.push_back(AABB(boxes[i])); }
         count = int(cfg["count"]); top = float(cfg["top"]); base = float(cfg["base"]); spacing = float(cfg["spacing"]); radius = float(cfg["radius"]);
+        build_terrain_index();
         lowest_floor=top;
         for (auto height:elevations) lowest_floor=std::min(lowest_floor,height);
         for (const auto &p:polygons) lowest_floor=std::min(lowest_floor,p.height);
