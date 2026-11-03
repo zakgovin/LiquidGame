@@ -133,13 +133,21 @@ def export(binary, env):
                   r'\1"";', text)
     text = text.replace('CODE_SIGN_IDENTITY = "Apple Distribution";', 'CODE_SIGN_IDENTITY = "Apple Development";')
     text = text.replace('$linker_flags', '')
+    # Godot generates a startup callback that registers the static entry
+    # with OS_AppleEmbedded. Require a real definition instead of allowing
+    # the default dynamic-lookup exception for that symbol.
+    text = text.replace("-Wl,-U,_hydrologic_library_init", "-Wl,-u,_hydrologic_library_init")
     text, linker_settings = re.subn(r'(OTHER_LDFLAGS\s*=\s*")([^\n]*)(";)',
-                  r'\1\2 -Wl,-u,_hydrologic_library_init -Wl,-exported_symbol,_hydrologic_library_init\3', text)
+                  r'\1\2 -Wl,-u,_hydrologic_library_init\3', text)
     if linker_settings < 2:
         raise RuntimeError("Could not preserve the water initializer in both Xcode configurations")
     if "UNSIGNED00" in text:
         raise RuntimeError("Template team marker was not removed")
     pbx.write_text(text)
+    registration = [p for p in destination.rglob("*.cpp")
+                    if 'register_dynamic_symbol((char *)"hydrologic_library_init"' in p.read_text(errors="replace")]
+    if not registration:
+        raise RuntimeError("Godot did not generate the static iOS water registration callback")
     for path in destination.rglob("*.plist"):
         if "xcframework" in str(path):
             continue
@@ -154,7 +162,8 @@ def xcode(project, *, simulator, arch):
     args = ["xcodebuild", "-project", project, "-scheme", "Hydrologic", "-configuration", "Release",
             "-destination", "generic/platform=iOS Simulator" if simulator else "generic/platform=iOS",
             "-derivedDataPath", derived, "CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO",
-            "CODE_SIGN_IDENTITY=", "DEVELOPMENT_TEAM=", f"IPHONEOS_DEPLOYMENT_TARGET={MIN_IOS}"]
+            "CODE_SIGN_IDENTITY=", "DEVELOPMENT_TEAM=", f"IPHONEOS_DEPLOYMENT_TARGET={MIN_IOS}",
+            "LD_GENERATE_MAP_FILE=YES", f"LD_MAP_FILE_PATH={OUTPUT / ('simulator-link.map' if simulator else 'device-link.map')}"]
     if simulator:
         run(args + ["-sdk", "iphonesimulator", f"ARCHS={arch}", "ONLY_ACTIVE_ARCH=YES", "build"])
         return derived / "Build/Products/Release-iphonesimulator/Hydrologic.app"
@@ -169,12 +178,17 @@ def verify(app, simulator=False):
     expected = "iPhoneSimulator" if simulator else "iPhoneOS"
     assert expected in info["CFBundleSupportedPlatforms"], info["CFBundleSupportedPlatforms"]
     executable = app / info["CFBundleExecutable"]
-    # iOS archives strip the ordinary nlist table. Runtime dlsym resolves
-    # the dyld export trie instead, so inspect the actual exported symbols.
-    symbols = run(["xcrun", "dyld_info", "-exports", executable], capture=True)
-    if "_hydrologic_library_init" not in symbols:
-        print(symbols[-3000:])
-        raise RuntimeError("The water initializer is absent from the iOS runtime export table")
+    # Godot's generated constructor registers the static function directly;
+    # iOS executable export/nlist tables may legitimately be empty. The link
+    # map proves that the function comes from our compiled fluid object,
+    # rather than an unresolved dynamic-lookup stub. The simulator then
+    # exercises the actual GDExtension loader and rendered native water.
+    link_map = (OUTPUT / ("simulator-link.map" if simulator else "device-link.map")).read_text()
+    symbol = re.search(r"^0x[0-9A-Fa-f]+\s+0x[0-9A-Fa-f]+\s+\[\s*(\d+)\]\s+_hydrologic_library_init\s*$", link_map, re.M)
+    objects = {int(index): path for index, path in re.findall(r"^\[\s*(\d+)\]\s+(.+)$", link_map, re.M)}
+    if not symbol or "libhydrologic" not in objects.get(int(symbol[1]), "") or "fluid" not in objects[int(symbol[1])]:
+        print("\n".join(line for line in link_map.splitlines() if "hydrologic" in line.lower())[-3000:])
+        raise RuntimeError("The link map does not contain the compiled water initializer")
     assert (app / "Hydrologic.pck").exists(), "Game resources missing"
     if not simulator:
         assert not (app / "embedded.mobileprovision").exists()
