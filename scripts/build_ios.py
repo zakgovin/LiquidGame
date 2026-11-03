@@ -50,6 +50,14 @@ def tools():
         with zipfile.ZipFile(archive) as z:
             with z.open("templates/ios.zip") as source, (templates / "ios.zip").open("wb") as dest:
                 shutil.copyfileobj(source, dest)
+    # Godot follows macOS's standard Application Support directory, not
+    # XDG_DATA_HOME. Keep the verified template in the cache and expose it
+    # at the path actually used by the macOS editor.
+    mac_templates = Path.home() / "Library/Application Support/Godot/export_templates/4.6.3.stable"
+    mac_templates.mkdir(parents=True, exist_ok=True)
+    installed = mac_templates / "ios.zip"
+    if not installed.exists():
+        installed.symlink_to(templates / "ios.zip")
     if not (CPP / "SConstruct").exists():
         archive = setup.download("godot-cpp-4.5-stable.zip",
             "https://codeload.github.com/godotengine/godot-cpp/zip/refs/tags/godot-4.5-stable",
