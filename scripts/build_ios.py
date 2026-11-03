@@ -134,7 +134,7 @@ def export(binary, env):
     text = text.replace('CODE_SIGN_IDENTITY = "Apple Distribution";', 'CODE_SIGN_IDENTITY = "Apple Development";')
     text = text.replace('$linker_flags', '')
     text, linker_settings = re.subn(r'(OTHER_LDFLAGS\s*=\s*")([^\n]*)(";)',
-                  r'\1\2 -Wl,-u,_hydrologic_library_init -Wl,-export_dynamic\3', text)
+                  r'\1\2 -Wl,-u,_hydrologic_library_init -Wl,-exported_symbol,_hydrologic_library_init\3', text)
     if linker_settings < 2:
         raise RuntimeError("Could not preserve the water initializer in both Xcode configurations")
     if "UNSIGNED00" in text:
@@ -169,8 +169,12 @@ def verify(app, simulator=False):
     expected = "iPhoneSimulator" if simulator else "iPhoneOS"
     assert expected in info["CFBundleSupportedPlatforms"], info["CFBundleSupportedPlatforms"]
     executable = app / info["CFBundleExecutable"]
-    symbols = run(["xcrun", "nm", "-gU", executable], capture=True)
-    assert "_hydrologic_library_init" in symbols, "Static water solver was stripped from executable"
+    # iOS archives strip the ordinary nlist table. Runtime dlsym resolves
+    # the dyld export trie instead, so inspect the actual exported symbols.
+    symbols = run(["xcrun", "dyld_info", "-exports", executable], capture=True)
+    if "_hydrologic_library_init" not in symbols:
+        print(symbols[-3000:])
+        raise RuntimeError("The water initializer is absent from the iOS runtime export table")
     assert (app / "Hydrologic.pck").exists(), "Game resources missing"
     if not simulator:
         assert not (app / "embedded.mobileprovision").exists()
