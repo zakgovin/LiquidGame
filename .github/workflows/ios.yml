@@ -59,6 +59,10 @@ jobs:
             ${{ env.HYDRO_TOOLS }}/data/godot/export_templates
             ${{ env.HYDRO_TOOLS }}/godot-cpp-4.5
             ${{ env.HYDRO_TOOLS }}/python
+            native/obj
+            native/src/*.os
+            native/src/*.o
+            native/.sconsign.dblite
           key: ios-godot463-cpp45-${{ runner.arch }}-${{ hashFiles('native/**', 'scripts/build_ios.py') }}
           restore-keys: ios-godot463-cpp45-${{ runner.arch }}-
       - name: Build device IPA, Xcode project and simulator smoke test
@@ -85,6 +89,10 @@ jobs:
             ${{ env.HYDRO_TOOLS }}/data/godot/export_templates
             ${{ env.HYDRO_TOOLS }}/godot-cpp-4.5
             ${{ env.HYDRO_TOOLS }}/python
+            native/obj
+            native/src/*.os
+            native/src/*.o
+            native/.sconsign.dblite
           key: ${{ steps.apple_cache.outputs.cache-primary-key }}
       - name: Keep build diagnostics
         if: always()

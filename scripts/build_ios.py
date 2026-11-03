@@ -129,11 +129,14 @@ def export(binary, env):
     text = pbx.read_text()
     # UNSIGNED00 is only Godot's nonempty-template marker, never an Apple
     # identity. Remove it before building or distributing the Xcode project.
-    text = text.replace("DEVELOPMENT_TEAM = UNSIGNED00;", 'DEVELOPMENT_TEAM = "";')
+    text = re.sub(r'((?:DEVELOPMENT_TEAM|DevelopmentTeam)\s*=\s*)"?UNSIGNED00"?;',
+                  r'\1"";', text)
     text = text.replace('CODE_SIGN_IDENTITY = "Apple Distribution";', 'CODE_SIGN_IDENTITY = "Apple Development";')
     text = text.replace('$linker_flags', '')
-    text = re.sub(r'(OTHER_LDFLAGS = "[^"\n]*)";',
-                  r'\1 -Wl,-u,_hydrologic_library_init -Wl,-export_dynamic";', text)
+    text, linker_settings = re.subn(r'(OTHER_LDFLAGS\s*=\s*")([^\n]*)(";)',
+                  r'\1\2 -Wl,-u,_hydrologic_library_init -Wl,-export_dynamic\3', text)
+    if linker_settings < 2:
+        raise RuntimeError("Could not preserve the water initializer in both Xcode configurations")
     if "UNSIGNED00" in text:
         raise RuntimeError("Template team marker was not removed")
     pbx.write_text(text)
