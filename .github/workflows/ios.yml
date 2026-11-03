@@ -65,6 +65,16 @@ jobs:
           mkdir -p build/ios
           set -o pipefail
           python3 scripts/build_ios.py 2>&1 | tee build/ios/build.log
+      - name: Report build error details
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('build/ios/build.log')
+          text = '\n'.join(path.read_text(errors='replace').splitlines()[-70:]) if path.exists() else 'Build did not start; inspect the setup steps.'
+          text = text[-20000:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print('::error title=iOS build diagnostics::' + text)
+          PY
       - name: Keep build diagnostics
         if: always()
         uses: actions/upload-artifact@v4

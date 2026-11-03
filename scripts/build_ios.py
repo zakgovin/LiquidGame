@@ -69,6 +69,8 @@ def tools():
 
 
 def native(env):
+    (PROJECT / "native/obj").mkdir(parents=True, exist_ok=True)
+    (PROJECT / "native/obj/.gdignore").touch()
     arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
     scons = [sys.executable, "-m", "SCons", f"-j{min(os.cpu_count() or 2, 4)}", "target=template_release",
              f"build_profile={PROJECT / 'native/build_profile.json'}", "debug_symbols=no"]
