@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.15.1\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.16.0\nLanguage: ru\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "ГИДРОЛОГИКА"
@@ -107,7 +107,7 @@ msgid "ABOUT_PAUSE"
 msgstr "Пауза останавливает поток. Из неё можно начать заново или вернуться в главное меню."
 
 msgid "ABOUT_FUTURE"
-msgstr "Вода — первая жидкость прототипа. Дальше — новые свойства и взаимодействия."
+msgstr "Вода — первая жидкость прототипа. По задумке должны быть и другие жидкости, но развитие прототипа на паузе."
 
 msgid "AUTHORS"
 msgstr "Авторы игры"
@@ -203,4 +203,10 @@ msgid "LEVEL_FULL_CYCLE"
 msgstr "Полный цикл"
 
 msgid "FULL_CYCLE_ROUTE"
-msgstr "Соберите обе порции в накопителе.\nОткройте его, ударьте по заслонке, заморозьте воду,\nпройдите решётку и растопите лёд. Цель — последний сосуд."
+msgstr "Соберите обе порции в накопителе.\nОткройте его, ударьте по заслонке, заморозьте воду,\nпройдите две решётки и растопите лёд. Цель — последний сосуд."
+
+msgid "CAMERA_COLLECTOR"
+msgstr "К накопителю"
+
+msgid "CAMERA_WATER"
+msgstr "К воде"

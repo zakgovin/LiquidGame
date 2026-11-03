@@ -21,6 +21,7 @@ func tap_source(game: Node, id: StringName) -> void:
 func _run() -> void:
 	var game := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	root.add_child(game)
+	game.sounds.set_enabled(false)
 	game.set_physics_process(false)
 	await process_frame
 	game._select_level(9)
@@ -54,10 +55,20 @@ func _run() -> void:
 		solver.call("set_particle_state",i,p,Vector3.ZERO)
 	game.simulation.step(0.0,Vector2.ZERO)
 	check(game.simulation.source_fill[game.level.collection_source]==4096 and game.simulation.delivered_count==0 and not game.simulation.completed,"A full intermediate collector is visible water and never a victory")
+	# Even a tiny remaining portion must be collectable before moving on.
+	for i: int in range(48): solver.call("set_particle_state",i,Vector3(3.6,0.62,-1.5),Vector3.ZERO)
+	game.simulation.step(0.0,Vector2.ZERO)
+	check(game._course_focus().get_center().y<0.0,"A collector over eighty percent full never steals the camera from the remaining water")
+	game.hud.buttons.collector_camera.pressed.emit()
+	check(game._collector_focus and game._course_focus().get_center().y>7.0,"The player can focus the collector with the camera button")
+	game.hud.buttons.collector_camera.pressed.emit()
+	check(not game._collector_focus and game._course_focus().get_center().y<0.0,"The same button returns to the remaining water")
+	game.hud.buttons.collector_camera.pressed.emit()
 	game._focus_rect=Rect2()
 	game._update_course_camera(0)
 	tap_source(game,game.level.collection_source)
 	check(game._opened_sources.has(game.level.collection_source) and game.controls.neutral==calibration,"Tapping the full collector releases the same water without recalibration")
+	check(not game._collector_focus,"Opening the collector returns to downstream water tracking")
 	var elapsed: float = game.simulation.elapsed_seconds
 	game._pause()
 	for frame: int in range(60): game._physics_process(1.0/60.0)
@@ -65,6 +76,11 @@ func _run() -> void:
 	game._resume()
 	for frame: int in range(44): game._physics_process(1.0/60.0)
 	check(not game.opening and game.screen==game.Screen.PLAYING,"Resume completes the pending collector opening")
+	game.board.show_goal_intake(4096)
+	game.board.advance_effects(1.0)
+	game.board.show_goal_intake(4095)
+	game.board.advance_effects(0.01)
+	check(game.board._goal_flaps[4].rotation.y<0.0 and game.board._goal_flaps[5].rotation.y>0.0,"The collector outlet leaves visibly open downstream while its water drains")
 	game.controls.use_rotation=true
 	game.pivot.rotation=Vector3.ZERO
 	game._focus_rect=Rect2(-0.9,13.8,5.4,8.0)
@@ -80,9 +96,20 @@ func _run() -> void:
 	check(stable_projection,"Rotation gestures retain their world-plane angle after the camera follows distant rooms")
 	game._restart()
 	check(game._opened_sources.is_empty() and game.simulation.source_fill[&"source_10_a"]==2048 and game.simulation.source_fill[&"source_10_b"]==2048 and game.simulation.source_fill[game.level.collection_source]==0,"Restart restores both halves, the empty collector and all three closed lids")
+	game._release(&"source_10_a")
+	for i: int in range(2048): solver.call("set_particle_state",i,Vector3(-0.62+(i%32)*0.038,-0.12+((i/32)%4)*0.038,6.9+(i/128)*0.038),Vector3.ZERO)
+	game.simulation.step(0.0,Vector2.ZERO)
+	game._focus_rect=Rect2(-3.0,3.8,6.0,8.0)
+	check(game._course_focus().has_point((game.level.sources[1].bounds as Rect2).get_center()),"The remaining sealed initial reservoir remains reachable after the first portion is stored")
+	game._restart()
 	game._next_level()
 	check(game.level_index==9,"The final course has no unavailable next level")
+	game._select_level(0)
+	game._start()
+	game._physics_process(0.0)
+	check(not game.hud.collector_camera_button.visible and not game.hud.buttons.has("collector_camera"),"Earlier levels retain their pause-only gameplay interface")
 	Input.set_gravity(Vector3.ZERO)
+	solver = null
 	game.free()
 	await process_frame
 	print("FINAL_INPUT_RESULT checks=",checks," failures=",failures)

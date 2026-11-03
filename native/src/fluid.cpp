@@ -743,20 +743,25 @@ class NativeLiquidSolver : public RefCounted {
         if (collection_index>=0) {
             const auto &bank=sources[collection_index];
             Vector2 xz(point.x,point.z);
-            if (bank.bounds.has_point(xz) && point.y>=floor_height(xz) && point.y<top) bank_captured[i]=1;
+            if (!bank_captured[i] && bank.bounds.has_point(xz) && point.y>=floor_height(xz) && point.y<top) bank_captured[i]=1;
             if (bank.opening<.999f) {
                 if (bank_captured[i]) {
                     point.x=clampf(point.x,bank.bounds.position.x+radius,bank.bounds.get_end().x-radius);
                     point.z=clampf(point.z,bank.bounds.position.y+radius,bank.bounds.get_end().y-radius);
                     point.y=clampf(point.y,floor_height(Vector2(point.x,point.z))+radius,top-radius);
                 }
-            } else if (bank_captured[i] && positions[i].z>=bank.bounds.position.y+radius-.0001f &&
-                       point.z<bank.bounds.position.y+radius && point.x>=bank.bounds.position.x-radius &&
-                       point.x<=bank.bounds.get_end().x+radius && point.y<top+.07f) {
-                // Opening the outlet does not remove the inlet check valve.
-                // Grid pressure alone cannot stop a FLIP residual from
-                // carrying admitted water back into an earlier chamber.
-                point.z=bank.bounds.position.y+radius;
+            } else if (bank_captured[i]==1) {
+                // The covered checkpoint retains its inlet and side walls
+                // after opening. Only the low downstream port is an exit.
+                point.x=clampf(point.x,bank.bounds.position.x+radius,bank.bounds.get_end().x-radius);
+                point.z=std::max(point.z,bank.bounds.position.y+radius);
+                point.y=std::min(point.y,top-radius);
+                if (point.z>=bank.bounds.get_end().y+radius) bank_captured[i]=2;
+            } else if (bank_captured[i]==2 && point.z<bank.bounds.get_end().y+radius &&
+                       point.y<top+.07f) {
+                // A parcel that passed the outlet can never flow upstream
+                // again. Keep it active downstream, not scored or removed.
+                point.z=bank.bounds.get_end().y+radius;
             }
         }
         Vector2 goal_xz(point.x,point.z);
@@ -1365,7 +1370,12 @@ public:
         valve_faces.clear(); valve_closed.assign(safe_goal ? total : 0,0);
         if (safe_goal) {
             std::vector<Rect2> receivers{goal};
-            if (collection_index>=0) receivers.push_back(sources[collection_index].bounds);
+            if (collection_index>=0) {
+                Rect2 bank=sources[collection_index].bounds;
+                receivers.push_back(bank);
+                bank.position.y=bank.get_end().y;
+                receivers.push_back(bank); // The collector outlet is one-way too.
+            }
             for (const Rect2 &receiver:receivers) {
             int z=std::max(1,std::min(nz-2,int(std::round((receiver.position.y-origin.z)/cell_size))));
             for (int y=1;y<ny-1;++y) for (int x=1;x<nx-1;++x) {
@@ -1512,6 +1522,7 @@ public:
         ERR_FAIL_INDEX(i,count); positions[i]=p; velocities[i]=v;
         if (phases[i]==ICE) ice_dirty=true;
         if (captured[i]) { captured[i]=0; --secured; }
+        bank_captured[i]=0;
         if (!active[i]) { active[i]=1; --lost; if (loss_reason[i]==2) --lost_in_void; if (loss_reason[i]==3) --lost_without_rim; }
         over_rim[i]=p.y>=top-radius; through_void[i]=0; loss_reason[i]=0; escaped[i]=0;
     }

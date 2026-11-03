@@ -11,6 +11,7 @@ signal about_requested
 signal levels_requested
 signal level_selected(index: int)
 signal next_requested
+signal collector_camera_requested
 signal language_changed(code: String)
 signal sensitivity_changed(value: float)
 signal mode_changed(use_rotation: bool)
@@ -27,6 +28,7 @@ const BOLD = preload("res://assets/fonts/NotoSans-Bold.ttf")
 
 var field: FieldInput
 var pause_button: Button
+var collector_camera_button: Button
 var page: Control
 var brand: HydrologicBrand
 var _modal: Control
@@ -51,6 +53,9 @@ func _ready() -> void:
 	add_child(field)
 	pause_button = _button("Ⅱ", Rect2(0, 0, 104, 104), false, func(): pause_requested.emit(), self, "pause")
 	pause_button.tooltip_text = tr("PAUSE")
+	collector_camera_button = _button(tr("CAMERA_COLLECTOR"), Rect2(32,32,290,88), false, func(): collector_camera_requested.emit(), self, "collector_camera")
+	collector_camera_button.add_theme_font_size_override("font_size", 24)
+	collector_camera_button.hide()
 	resized.connect(_layout)
 	_layout()
 
@@ -76,6 +81,7 @@ func _clear_page() -> void:
 	_frames.clear()
 	buttons.clear()
 	buttons["pause"] = pause_button
+	collector_camera_button.hide()
 	field.active = false
 	field.reset()
 
@@ -123,6 +129,13 @@ func show_game(rotation_enabled: bool) -> void:
 	pause_button.show()
 	field.active = rotation_enabled
 	field.rotation_enabled = rotation_enabled
+
+
+func show_collector_camera(available: bool, focused: bool) -> void:
+	collector_camera_button.visible = available
+	collector_camera_button.text = tr("CAMERA_WATER" if focused else "CAMERA_COLLECTOR")
+	if available: buttons["collector_camera"] = collector_camera_button
+	else: buttons.erase("collector_camera")
 
 
 func show_ready(opening: bool = false, rotate: bool = false) -> void:

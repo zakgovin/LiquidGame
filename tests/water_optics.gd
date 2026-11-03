@@ -67,12 +67,12 @@ func _run() -> void:
 	final_level.particle_count=1
 	f = LiquidSimulation.new(final_level,WATER)
 	f.set_gate_opening(1.0)
-	f.set_particle(0,Vector3(-2.39,0.617,3.1),Vector3.ZERO)
+	f.set_particle(0,Vector3(-2.80,0.617,3.3),Vector3.ZERO)
 	for frame: int in range(180): f.settle(1.0/60.0,Vector2.RIGHT)
-	check(f.lost_count==0 and f.positions[0].x<=-2.38-WATER.particle_radius+0.0001,"The far face of a thin bank cannot pull water through the solid")
+	check(f.lost_count==0 and final_level.floor_height(Vector2(f.positions[0].x,f.positions[0].z))<0.7,"The far face of a curved low bank cannot pull water through the solid")
 	f.reset()
 	f.set_gate_opening(1.0)
-	f.set_particle(0,Vector3(-2.4,1.35,3.1),Vector3(1.5,0,0))
+	f.set_particle(0,Vector3(-2.65,1.1,3.3),Vector3(1.5,0,0))
 	for frame: int in range(120): f.settle(1.0/60.0,Vector2.RIGHT)
 	check(f.lost_count==1 and f.lost_in_void==1,"Water above the real low bank can still spill into the well behind it")
 	f.reset()
@@ -82,6 +82,16 @@ func _run() -> void:
 	f.set_source_opening(final_level.collection_source,1.0)
 	for frame: int in range(120): f.settle(1.0/60.0,Vector2.UP)
 	check(f.lost_count==0 and f.positions[0].z>=6.8+WATER.particle_radius-0.0001,"Opening the collector outlet preserves its physical one-way inlet")
+	for frame: int in range(120): f.settle(1.0/60.0,Vector2.RIGHT)
+	check(f.lost_count==0 and f.positions[0].x<0.7,"The opened checkpoint also retains water at the side of its inlet")
+	var exited := false
+	for frame: int in range(600):
+		f.settle(1.0/60.0,Vector2.DOWN)
+		if f.positions[0].z>8.48:
+			exited = true
+			break
+	for frame: int in range(180): f.settle(1.0/60.0,Vector2.UP)
+	check(exited and f.lost_count==0 and f.positions[0].z>=8.4+WATER.particle_radius-0.0001,"The checkpoint outlet allows departure but blocks a strong reversal before the height drop")
 	f = null
 	var bend := (load("res://resources/second_level.tres") as LevelDefinition).duplicate() as LevelDefinition
 	bend.particle_count=32

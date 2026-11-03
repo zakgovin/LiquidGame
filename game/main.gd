@@ -33,6 +33,7 @@ var _opened_sources: Dictionary = {}
 var _focus_center := Vector3.ZERO
 var _focus_rect := Rect2()
 var _focus_tick: int = 0
+var _collector_focus: bool = false
 var _paused_from: Screen = Screen.PLAYING
 const OPEN_SECONDS: float = 0.70
 const FINISH_SECONDS: float = 0.50
@@ -75,6 +76,7 @@ func _ready() -> void:
 	hud.levels_requested.connect(_levels)
 	hud.level_selected.connect(_select_level)
 	hud.next_requested.connect(_next_level)
+	hud.collector_camera_requested.connect(_toggle_collector_camera)
 	hud.language_changed.connect(_set_language)
 	hud.sensitivity_changed.connect(func(value: float):
 		controls.sensitivity = value
@@ -155,6 +157,7 @@ func _physics_process(delta: float) -> void:
 	if screen != Screen.PAUSED:
 		_update_camera(delta)
 		board.advance_effects(delta)
+	hud.show_collector_camera(not level.collection_source.is_empty() and screen in [Screen.READY,Screen.PLAYING] and not opening and not _opened_sources.has(level.collection_source), _collector_focus)
 	var target := Vector3.ZERO
 	if tilt_feedback and not controls.use_rotation and screen == Screen.PLAYING:
 		var visible_tilt := world_tilt.normalized() * sqrt(world_tilt.length())
@@ -254,6 +257,8 @@ func _tap_field(point: Vector2) -> void:
 
 func _position_source_hint() -> void:
 	if screen != Screen.READY: return
+	if is_instance_valid(hud.source_hint): hud.source_hint.visible = not _collector_focus
+	if _collector_focus: return
 	hud.position_source_hint(camera.unproject_position(board.to_global(board.source_anchor(_next_source()))))
 
 
@@ -356,6 +361,9 @@ func _release(source: StringName = &"") -> void:
 	if source == level.collection_source and simulation.source_fill.get(source,0) < ceili(level.required_fraction*level.particle_count): return
 	if screen == Screen.READY: controls.calibrate()
 	_opened_sources[source] = true
+	if source == level.collection_source:
+		_collector_focus = false
+		_focus_rect = Rect2()
 	_opening_source = source
 	opening = true
 	running = true
@@ -369,6 +377,7 @@ func _release(source: StringName = &"") -> void:
 func _restart() -> void:
 	simulation.reset()
 	_opened_sources.clear()
+	_collector_focus = false
 	_opening_source = &""
 	_focus_rect = Rect2()
 	_focus_center = Vector3.ZERO
@@ -567,32 +576,33 @@ func _next_source() -> StringName:
 	return level.reservoir_id
 
 
+func _toggle_collector_camera() -> void:
+	if level.collection_source.is_empty() or screen not in [Screen.READY,Screen.PLAYING] or opening or _opened_sources.has(level.collection_source): return
+	_collector_focus = not _collector_focus
+	_focus_rect = Rect2()
+	hud.show_collector_camera(true, _collector_focus)
+	_position_source_hint()
+
+
 func _course_focus() -> Rect2:
+	if _collector_focus: return Rect2(-3.0,3.8,6.0,8.0)
 	if screen == Screen.READY: return level.camera_zones[0]
-	var bank_fill: int = simulation.source_fill.get(level.collection_source,0)
-	var waiting_focus := Rect2()
-	# Stored water is protected. Return to the remaining sealed half when
-	# the first stream has arrived, rather than following droplets forever.
-	if not _opened_sources.has(level.collection_source):
-		for source: Dictionary in level.sources:
-			if source.fill > 0.0 and not _opened_sources.has(source.id):
-				waiting_focus=level.camera_zones[0]
-				if bank_fill >= level.particle_count*0.40: return waiting_focus
-		if bank_fill >= level.particle_count*level.required_fraction: return Rect2(-3.0,3.8,6.0,8.0)
+	# Include unopened initial water so its lid remains reachable. Exclude
+	# only the protected collector; its focus is always the player's choice.
 	var xs: Array[float] = []
 	var zs: Array[float] = []
 	for i: int in range(simulation.positions.size()):
 		if simulation.active[i] == 0 or simulation.phases[i] == 2: continue
 		var p := simulation.positions[i]
+		if _opened_sources.has(level.collection_source) and p.z < (level.sources[2].bounds as Rect2).position.y: continue
 		var excluded := false
 		for source: Dictionary in level.sources:
-			if not _opened_sources.has(source.id) and (source.bounds as Rect2).has_point(Vector2(p.x,p.z)):
+			if source.id == level.collection_source and not _opened_sources.has(source.id) and (source.bounds as Rect2).has_point(Vector2(p.x,p.z)):
 				excluded = true
 				break
 		if excluded: continue
 		xs.append(p.x)
 		zs.append(p.z)
-	if waiting_focus.has_area() and xs.size()<level.particle_count*0.08: return waiting_focus
 	if xs.is_empty(): return _focus_rect if _focus_rect.has_area() else level.camera_zones[0]
 	xs.sort()
 	zs.sort()

@@ -242,10 +242,26 @@ func _build_safe_goal(level: LevelDefinition, covered: bool = true) -> void:
 	# An inset arrow on the receiver floor makes the allowed direction clear.
 	var centre := Vector3(g.get_center().x, floor_y + 0.009, g.position.y + 0.30)
 	_triangle(centre + Vector3(0, 0, 0.17), centre + Vector3(-0.14, 0, -0.12), centre + Vector3(0.14, 0, -0.12), Vector3.UP, accent)
+	if not covered:
+		# A separate low outlet valve stays behind after the removable lid
+		# flies away. Its leaves can swing downstream only.
+		for side: int in range(2):
+			var hinge := Node3D.new()
+			hinge.name = "CollectorOutletValve%d" % side
+			hinge.position = Vector3(g.position.x if side == 0 else g.end.x, floor_y + 0.175, g.end.y + 0.045)
+			add_child(hinge)
+			var offset := g.size.x * 0.25 * (1.0 if side == 0 else -1.0)
+			_box(Vector3(g.size.x * 0.5 - 0.02, 0.30, 0.025), Vector3(offset, 0, 0), _glass_material(0.16), hinge)
+			_box(Vector3(0.025, 0.30, 0.035), Vector3(offset * 2, 0, 0), _rim, hinge)
+			_goal_flaps.append(hinge)
+		var outlet := Vector3(g.get_center().x, floor_y + 0.009, g.end.y + 0.20)
+		_triangle(outlet + Vector3(0, 0, 0.13), outlet + Vector3(-0.10, 0, -0.09), outlet + Vector3(0.10, 0, -0.09), Vector3.UP, accent)
 
 
 func show_goal_intake(secured: int, activity: bool = false) -> void:
-	if secured > _secured_seen or activity: _intake_phase = 1.0
+	# The collector outlet moves while its fill decreases as well as when
+	# incoming water increases the protected volume.
+	if secured != _secured_seen or activity: _intake_phase = 1.0
 	_secured_seen = secured
 
 
@@ -609,7 +625,7 @@ func show_spills(points: PackedVector3Array) -> void:
 func advance_effects(delta: float) -> void:
 	_intake_phase = maxf(0.0, _intake_phase - delta * 3.0)
 	for i: int in range(_goal_flaps.size()):
-		_goal_flaps[i].rotation.y = _intake_phase * _intake_angle * (-1.0 if i == 0 else 1.0)
+		_goal_flaps[i].rotation.y = _intake_phase * _intake_angle * (-1.0 if i % 2 == 0 else 1.0)
 	for i: int in range(_spill_cues.size()):
 		_spill_ages[i] += delta
 		var age := _spill_ages[i]

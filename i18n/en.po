@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: Hydrologic 0.15.1\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: Hydrologic 0.16.0\nLanguage: en\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "BRAND_TITLE"
 msgstr "HYDROLOGIC"
@@ -107,7 +107,7 @@ msgid "ABOUT_PAUSE"
 msgstr "Pause stops the flow. You can restart the level or return to the main menu."
 
 msgid "ABOUT_FUTURE"
-msgstr "Water is the prototype's first liquid. More materials and interactions are planned."
+msgstr "Water is the prototype's first liquid. Other liquids are intended, but development of the prototype is on hold."
 
 msgid "AUTHORS"
 msgstr "Game creators"
@@ -203,4 +203,10 @@ msgid "LEVEL_FULL_CYCLE"
 msgstr "Full Cycle"
 
 msgid "FULL_CYCLE_ROUTE"
-msgstr "Guide both portions into the collector.\nOpen it, strike the gate, freeze, cross the grate and melt.\nOnly water in the final vessel counts."
+msgstr "Guide both portions into the collector.\nOpen it, strike the gate, freeze, cross both grates and melt.\nOnly water in the final vessel counts."
+
+msgid "CAMERA_COLLECTOR"
+msgstr "View collector"
+
+msgid "CAMERA_WATER"
+msgstr "Follow water"
