@@ -1,16 +1,16 @@
 # Гидрологика / Hydrologic
 
-Android-игра об управлении жидкостью наклоном телефона или вращением поля. **Версия 0.16.0 дорабатывает финальный уровень: ручное переключение камеры, односторонний накопитель, опасная извилина слева, спуск перед ударной заслонкой и две решётки перед нагревом.** Цель — доставить не менее **80% исходной массы** в красный приёмник и удержать её **0,75 с**. На «Заморозке» принимается лёд, на остальных уровнях — вода.
+Android-игра об управлении жидкостью наклоном телефона или вращением поля. **Версия 0.16.1 переносит створки обратного клапана и стрелку финального сосуда десятого уровня на левый вход, со стороны потока после нагревателя. Развитие прототипа на паузе.** Цель — доставить не менее **80% исходной массы** в красный приёмник и удержать её **0,75 с**. На «Заморозке» принимается лёд, на остальных уровнях — вода.
 
 Авторы: **Zakhar Govin и Codex (OpenAI)**. Они также указаны в разделе «Об игре».
 
-[Изменения финала и проверки версии 0.16.0](docs/FINAL_0_16.ru.md). [Предыдущие замеры производительности](docs/PERFORMANCE_0_15_1.ru.md).
+[Последняя правка и проверки](docs/VALIDATION.md). [Маршрут финального уровня](docs/FINAL_0_16.ru.md). [Предыдущие замеры производительности](docs/PERFORMANCE_0_15_1.ru.md).
 
 ## Скачать на Android
 
-[Скачать ZIP с APK Hydrologic 0.16.0](https://codeload.github.com/zakgovin/LiquidGame/zip/refs/heads/downloads-v0.16.0) — распакуйте архив и откройте APK. Этот вариант подходит, если загрузка APK в браузере телефона зависает на 100%.
+[Скачать ZIP с APK Hydrologic 0.16.1](https://codeload.github.com/zakgovin/LiquidGame/zip/refs/heads/downloads-v0.16.1) — распакуйте архив и откройте APK. Этот вариант подходит, если загрузка APK в браузере телефона зависает на 100%.
 
-[Прямая ссылка на APK](https://github.com/zakgovin/LiquidGame/raw/refs/heads/downloads-v0.16.0/hydrologic-0.16.0-android.apk). Сборка и SHA-256 находятся в ветке [downloads-v0.16.0](https://github.com/zakgovin/LiquidGame/tree/downloads-v0.16.0). Прежние ссылки сохранены.
+[Прямая ссылка на APK](https://github.com/zakgovin/LiquidGame/raw/refs/heads/downloads-v0.16.1/hydrologic-0.16.1-android.apk). Сборка и SHA-256 находятся в ветке [downloads-v0.16.1](https://github.com/zakgovin/LiquidGame/tree/downloads-v0.16.1). Прежние ссылки сохранены.
 
 Тестовая debug-сборка: Android 7.0+ / API 24, OpenGL ES 3.0, ARM64 и x86_64. Работает офлайн, разрешений не запрашивает. Ключ подписи сохранён для обновления предыдущей установленной версии.
 
@@ -88,11 +88,11 @@ F5 запускает проект. В режиме наклона на комп
 ./scripts/godot.sh --audio-driver Dummy --resolution 720x1280 --script res://tests/advanced_input.gd -- rotation
 ./scripts/godot.sh --headless --script res://tests/advanced_input.gd -- tilt
 
-adb install -r build/hydrologic-0.16.0-android.apk
+adb install -r build/hydrologic-0.16.1-android.apk
 adb shell am start -n com.zakgovin.hydrologic/com.godot.game.GodotAppLauncher
 ```
 
-Результат сборки — `build/hydrologic-0.16.0-android.apk`. Локальный debug-ключ не попадает в Git; новый ключ не позволит обновить прежнюю установленную сборку.
+Результат сборки — `build/hydrologic-0.16.1-android.apk`. Локальный debug-ключ не попадает в Git; новый ключ не позволит обновить прежнюю установленную сборку.
 
 Проверки новых уровней проходят через игровой контроллер, физику, касание резервуара и фильтр датчика либо вращение поля. [Результаты и ограничения](docs/VALIDATION.md). На физическом Android-устройстве ещё требуется оценить FPS, нагрев, датчик и удобство новых механик.
 

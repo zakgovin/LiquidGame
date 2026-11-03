@@ -17,6 +17,7 @@ func _init() -> void:
 	spawn = reservoir_bounds.grow(-0.1)
 	goal = Rect2(1.0, 17.0, 1.6, 1.8)
 	safe_goal = true
+	goal_entry_direction = Vector2.RIGHT
 	sources = [
 		{"id": reservoir_id, "bounds": reservoir_bounds, "height": 0.6, "fill": 0.5},
 		{"id": &"source_10_b", "bounds": Rect2(0.1, -4.5, 1.2, 1.45), "height": 0.6, "fill": 0.5},

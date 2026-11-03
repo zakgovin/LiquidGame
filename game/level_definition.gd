@@ -27,6 +27,8 @@ extends Resource
 @export var goal: Rect2
 @export var particle_count: int = 6144
 @export var safe_goal: bool = false
+## Inward direction of the visible receiver doors (cardinal board axis).
+@export var goal_entry_direction: Vector2 = Vector2.DOWN
 @export var obstacles: Array[AABB] = []
 @export var required_fraction: float = 0.8
 @export var hold_seconds: float = 0.75
