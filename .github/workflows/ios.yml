@@ -65,7 +65,7 @@ jobs:
             native/.sconsign.dblite
           key: ios-godot463-cpp45-${{ runner.arch }}-${{ hashFiles('native/**', 'scripts/build_ios.py') }}
           restore-keys: ios-godot463-cpp45-${{ runner.arch }}-
-      - name: Build device IPA, Xcode project and simulator smoke test
+      - name: Build and validate the device IPA and Xcode project
         run: |
           mkdir -p build/ios
           set -o pipefail
@@ -116,4 +116,4 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --title "Hydrologic ${VERSION} for iOS (unsigned)" --notes-file docs/IOS.ru.md
           fi
-          gh release upload "$TAG" build/ios/*.ipa build/ios/*.zip build/ios/SHA256SUMS build/ios/build-info.json build/ios/hydrologic-simulator.png --clobber
+          gh release upload "$TAG" build/ios/*.ipa build/ios/*.zip build/ios/SHA256SUMS build/ios/build-info.json --clobber

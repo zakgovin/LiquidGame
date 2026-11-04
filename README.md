@@ -16,7 +16,7 @@ Android-игра об управлении жидкостью наклоном �
 
 ## iPhone и iPad
 
-[iOS-сборка и установка с бесплатным Apple ID](docs/IOS.ru.md). Отдельный workflow [Build iOS prototype](https://github.com/zakgovin/LiquidGame/actions/workflows/ios.yml) собирает неподписанный IPA, проект Xcode и приложение для симулятора. Для установки на iPhone требуется подпись через Sideloadly/AltStore или Xcode; прямое открытие IPA на телефоне не заменяет подпись.
+[iOS-сборка и установка с бесплатным Apple ID](docs/IOS.ru.md). Отдельный workflow [Build iOS prototype](https://github.com/zakgovin/LiquidGame/actions/workflows/ios.yml) собирает и проверяет неподписанный IPA для реального устройства и проект Xcode. Для установки на iPhone требуется подпись через Sideloadly/AltStore или Xcode; прямое открытие IPA на телефоне не заменяет подпись.
 
 ## Управление
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an unsigned iPhone IPA, a portable Xcode project and a tested simulator app.
+"""Build an unsigned iPhone IPA and a portable device Xcode project.
 
 Run on macOS with Xcode. No Apple account, certificate or provisioning profile
 is used; signing with a personal Apple ID is a separate installation step.
@@ -123,6 +123,8 @@ def export(binary, env):
     destination = PROJECT / "build/ios-project"
     destination.mkdir(parents=True, exist_ok=True)
     run([binary, "--path", PROJECT, "--headless", "--editor", "--import"], env=env)
+    run([binary, "--path", PROJECT, "--headless", "--audio-driver", "Dummy",
+         "--script", "res://tests/final_input.gd"], env=env)
     run([binary, "--path", PROJECT, "--headless", "--export-release", "iOS", destination / "Hydrologic.ipa"], env=env)
     project = destination / "Hydrologic.xcodeproj"
     pbx = project / "project.pbxproj"
@@ -235,7 +237,7 @@ def smoke(app):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--skip-simulator", action="store_true", help="Build only the unsigned device app and Xcode project")
+    parser.add_argument("--simulator", action="store_true", help="Also attempt the experimental Simulator target (not required for the device IPA)")
     args = parser.parse_args()
     if platform.system() != "Darwin" or not shutil.which("xcodebuild"):
         raise SystemExit("iOS compilation requires macOS and Xcode; use the repository's iOS workflow.")
@@ -259,9 +261,12 @@ def main():
     run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", project.parent, xcode_zip])
     report = {"version": version, "bundle_id": BUNDLE_ID, "build": info["CFBundleVersion"],
               "device_arch": "arm64", "minimum_ios": MIN_IOS, "signed": False,
-              "godot": setup.VERSION, "native_solver": "linked static godot-cpp 4.5"}
+              "godot": setup.VERSION, "native_solver": "linked static godot-cpp 4.5",
+              "native_verified": "Godot startup registration and device link map",
+              "host_checks": "21 final_input checks on macOS", "simulator_tested": False,
+              "source_commit": os.environ.get("GITHUB_SHA") or run(["git", "rev-parse", "HEAD"], capture=True)}
     artifacts = [ipa, xcode_zip]
-    if not args.skip_simulator:
+    if args.simulator:
         simulator_app = xcode(project, simulator=True, arch=arch)
         verify(simulator_app, simulator=True)
         report["simulator_tested"] = smoke(simulator_app)
