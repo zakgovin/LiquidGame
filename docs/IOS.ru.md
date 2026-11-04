@@ -2,6 +2,8 @@
 
 Это тот же прототип с десятью уровнями, управлением наклоном и вращением поля, водой, льдом и паром. Нативный расчёт жидкости собран для iOS ARM64. Минимальная версия — iOS 13.
 
+[Скачать IPA без подписи](https://github.com/zakgovin/LiquidGame/releases/download/ios-v0.16.1/hydrologic-0.16.1-ios-unsigned.ipa) · [Проект Xcode](https://github.com/zakgovin/LiquidGame/releases/download/ios-v0.16.1/hydrologic-0.16.1-xcode.zip) · [SHA-256](https://github.com/zakgovin/LiquidGame/releases/download/ios-v0.16.1/SHA256SUMS)
+
 ## Установка без платного Apple Developer
 
 Файл `hydrologic-0.16.1-ios-unsigned.ipa` не подписан сертификатом Apple. Перед установкой его нужно подписать своим Apple ID на компьютере. Открытие скачанного IPA на iPhone само по себе приложение не устанавливает.

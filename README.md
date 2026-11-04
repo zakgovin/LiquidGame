@@ -16,6 +16,8 @@ Android-игра об управлении жидкостью наклоном �
 
 ## iPhone и iPad
 
+[Скачать IPA без подписи](https://github.com/zakgovin/LiquidGame/releases/download/ios-v0.16.1/hydrologic-0.16.1-ios-unsigned.ipa) · [Проект Xcode](https://github.com/zakgovin/LiquidGame/releases/download/ios-v0.16.1/hydrologic-0.16.1-xcode.zip). iOS 13+, ARM64.
+
 [iOS-сборка и установка с бесплатным Apple ID](docs/IOS.ru.md). Отдельный workflow [Build iOS prototype](https://github.com/zakgovin/LiquidGame/actions/workflows/ios.yml) собирает и проверяет неподписанный IPA для реального устройства и проект Xcode. Для установки на iPhone требуется подпись через Sideloadly/AltStore или Xcode; прямое открытие IPA на телефоне не заменяет подпись.
 
 ## Управление
