@@ -183,7 +183,7 @@ def verify(app, simulator=False):
     # map proves that the function comes from our compiled fluid object,
     # rather than an unresolved dynamic-lookup stub. The simulator then
     # exercises the actual GDExtension loader and rendered native water.
-    link_map = (OUTPUT / ("simulator-link.map" if simulator else "device-link.map")).read_text()
+    link_map = (OUTPUT / ("simulator-link.map" if simulator else "device-link.map")).read_text(errors="replace")
     symbol = re.search(r"^0x[0-9A-Fa-f]+\s+0x[0-9A-Fa-f]+\s+\[\s*(\d+)\]\s+_hydrologic_library_init\s*$", link_map, re.M)
     objects = {int(index): path for index, path in re.findall(r"^\[\s*(\d+)\]\s+(.+)$", link_map, re.M)}
     if not symbol or "libhydrologic" not in objects.get(int(symbol[1]), "") or "fluid" not in objects[int(symbol[1])]:
